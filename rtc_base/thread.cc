@@ -671,6 +671,9 @@ void Thread::Dispatch(Message* pmsg) {
   }
 }
 
+// e2e pin test: proves a commit pushed to the fork reaches the built archive.
+const char* kAmbientE2EPinProbe = "E2E_PIN_ROUNDTRIP_4d81ba";
+
 bool Thread::IsCurrent() const {
   return ThreadManager::Instance()->CurrentThread() == this;
 }
