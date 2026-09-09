@@ -671,6 +671,21 @@ void Thread::Dispatch(Message* pmsg) {
   }
 }
 
+// Submodule provenance probe. Runs during static initialisation, before main(), so it
+// appears even if the node never reaches the signal server. Proves which libwebrtc tree
+// the binary was built from.
+namespace {
+struct AmbientLibwebrtcProvenance {
+  AmbientLibwebrtcProvenance() {
+    fprintf(stderr,
+            "[AMBIENT-PROVENANCE] libwebrtc built from the owt-deps-webrtc submodule "
+            "probe=LIBWEBRTC_SUBMODULE_PIN_7c21e4 file=" __FILE__ "\n");
+    fflush(stderr);
+  }
+};
+AmbientLibwebrtcProvenance g_ambient_libwebrtc_provenance;
+}  // namespace
+
 bool Thread::IsCurrent() const {
   return ThreadManager::Instance()->CurrentThread() == this;
 }
