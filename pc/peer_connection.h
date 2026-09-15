@@ -643,6 +643,20 @@ class PeerConnection : public PeerConnectionInternal,
       std::vector<cricket::ChannelInterface*>* deferred_destroys)
       RTC_RUN_ON(signaling_thread());
 
+  RTCError UpdateSessionContents(
+      cricket::ContentSource source,
+      const SessionDescriptionInterface& new_session,
+      const SessionDescriptionInterface* old_local_description,
+      const SessionDescriptionInterface* old_remote_description,
+      const cricket::ContentGroup* bundle_group,
+      std::vector<PendingChannelCreate>* deferred_creates,
+      std::vector<cricket::ChannelInterface*>* deferred_destroys)
+      RTC_RUN_ON(signaling_thread());
+
+  void DestroyDeferredChannels(
+      std::vector<cricket::ChannelInterface*>* channels)
+      RTC_RUN_ON(signaling_thread());
+
   RTCError FlushPendingChannelCreates(
       std::vector<PendingChannelCreate>* pending)
       RTC_RUN_ON(signaling_thread());

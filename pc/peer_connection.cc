@@ -3516,18 +3516,28 @@ RTCError PeerConnection::UpdateTransceiversAndDataChannels(
 
   std::vector<PendingChannelCreate> deferred_creates;
   std::vector<cricket::ChannelInterface*> deferred_destroys;
-  auto destroy_deferred = [this, &deferred_destroys] {
-    if (deferred_destroys.empty()) {
-      return;
-    }
-    worker_thread()->Invoke<void>(RTC_FROM_HERE, [this, &deferred_destroys] {
-      for (cricket::ChannelInterface* ch : deferred_destroys) {
-        DestroyChannelInterface(ch);
-      }
-    });
-    deferred_destroys.clear();
-  };
 
+  RTCError error = UpdateSessionContents(
+      source, new_session, old_local_description, old_remote_description,
+      bundle_group, &deferred_creates, &deferred_destroys);
+
+  RTCError flush_error = FlushPendingChannelCreates(&deferred_creates);
+  DestroyDeferredChannels(&deferred_destroys);
+
+  if (!error.ok()) {
+    return error;
+  }
+  return flush_error;
+}
+
+RTCError PeerConnection::UpdateSessionContents(
+    cricket::ContentSource source,
+    const SessionDescriptionInterface& new_session,
+    const SessionDescriptionInterface* old_local_description,
+    const SessionDescriptionInterface* old_remote_description,
+    const cricket::ContentGroup* bundle_group,
+    std::vector<PendingChannelCreate>* deferred_creates,
+    std::vector<cricket::ChannelInterface*>* deferred_destroys) {
   const ContentInfos& new_contents = new_session.description()->contents();
   for (size_t i = 0; i < new_contents.size(); ++i) {
     const cricket::ContentInfo& new_content = new_contents[i];
@@ -3551,17 +3561,13 @@ RTCError PeerConnection::UpdateTransceiversAndDataChannels(
           AssociateTransceiver(source, new_session.GetType(), i, new_content,
                                old_local_content, old_remote_content);
       if (!transceiver_or_error.ok()) {
-        FlushPendingChannelCreates(&deferred_creates).ok();
-        destroy_deferred();
         return transceiver_or_error.MoveError();
       }
       auto transceiver = transceiver_or_error.MoveValue();
       RTCError error =
           UpdateTransceiverChannel(transceiver, new_content, bundle_group,
-                                   &deferred_creates, &deferred_destroys);
+                                   deferred_creates, deferred_destroys);
       if (!error.ok()) {
-        FlushPendingChannelCreates(&deferred_creates).ok();
-        destroy_deferred();
         return error;
       }
     } else if (media_type == cricket::MEDIA_TYPE_DATA) {
@@ -3573,21 +3579,27 @@ RTCError PeerConnection::UpdateTransceiversAndDataChannels(
       }
       RTCError error = UpdateDataChannel(source, new_content, bundle_group);
       if (!error.ok()) {
-        FlushPendingChannelCreates(&deferred_creates).ok();
-        destroy_deferred();
         return error;
       }
     } else {
-      FlushPendingChannelCreates(&deferred_creates).ok();
-      destroy_deferred();
       LOG_AND_RETURN_ERROR(RTCErrorType::INTERNAL_ERROR,
                            "Unknown section type.");
     }
   }
+  return RTCError::OK();
+}
 
-  RTCError flush_error = FlushPendingChannelCreates(&deferred_creates);
-  destroy_deferred();
-  return flush_error;
+void PeerConnection::DestroyDeferredChannels(
+    std::vector<cricket::ChannelInterface*>* channels) {
+  if (channels->empty()) {
+    return;
+  }
+  worker_thread()->Invoke<void>(RTC_FROM_HERE, [this, channels] {
+    for (cricket::ChannelInterface* ch : *channels) {
+      DestroyChannelInterface(ch);
+    }
+  });
+  channels->clear();
 }
 
 RTCError PeerConnection::FlushPendingChannelCreates(
