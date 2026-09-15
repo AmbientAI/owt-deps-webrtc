@@ -3515,6 +3515,8 @@ RTCError PeerConnection::UpdateTransceiversAndDataChannels(
     bundle_group = bundle_group_or_error.MoveValue();
   }
 
+  std::vector<PendingChannelCreate> deferred_creates;
+
   const ContentInfos& new_contents = new_session.description()->contents();
   for (size_t i = 0; i < new_contents.size(); ++i) {
     const cricket::ContentInfo& new_content = new_contents[i];
@@ -3538,12 +3540,14 @@ RTCError PeerConnection::UpdateTransceiversAndDataChannels(
           AssociateTransceiver(source, new_session.GetType(), i, new_content,
                                old_local_content, old_remote_content);
       if (!transceiver_or_error.ok()) {
+        FlushPendingChannelCreates(&deferred_creates).ok();
         return transceiver_or_error.MoveError();
       }
       auto transceiver = transceiver_or_error.MoveValue();
-      RTCError error =
-          UpdateTransceiverChannel(transceiver, new_content, bundle_group);
+      RTCError error = UpdateTransceiverChannel(transceiver, new_content,
+                                                bundle_group, &deferred_creates);
       if (!error.ok()) {
+        FlushPendingChannelCreates(&deferred_creates).ok();
         return error;
       }
     } else if (media_type == cricket::MEDIA_TYPE_DATA) {
@@ -3555,14 +3559,105 @@ RTCError PeerConnection::UpdateTransceiversAndDataChannels(
       }
       RTCError error = UpdateDataChannel(source, new_content, bundle_group);
       if (!error.ok()) {
+        FlushPendingChannelCreates(&deferred_creates).ok();
         return error;
       }
     } else {
+      FlushPendingChannelCreates(&deferred_creates).ok();
       LOG_AND_RETURN_ERROR(RTCErrorType::INTERNAL_ERROR,
                            "Unknown section type.");
     }
   }
 
+  return FlushPendingChannelCreates(&deferred_creates);
+}
+
+RTCError PeerConnection::FlushPendingChannelCreates(
+    std::vector<PendingChannelCreate>* pending) {
+  if (pending->empty()) {
+    return RTCError::OK();
+  }
+
+  const size_t count = pending->size();
+  std::vector<RtpTransportInternal*> transports(count);
+  std::vector<MediaTransportConfig> configs(count);
+  for (size_t i = 0; i < count; ++i) {
+    transports[i] = GetRtpTransport((*pending)[i].mid);
+    configs[i] = transport_controller_->GetMediaTransportConfig(
+        (*pending)[i].mid);
+  }
+
+  std::vector<cricket::ChannelInterface*> created(count, nullptr);
+  cricket::ChannelManager* cm = channel_manager();
+  webrtc::Call* call = call_ptr_;
+  const cricket::MediaConfig& media_config = configuration_.media_config;
+  rtc::Thread* signaling = signaling_thread();
+  const bool srtp_required = SrtpRequired();
+  const webrtc::CryptoOptions crypto_options = GetCryptoOptions();
+  worker_thread()->Invoke<void>(RTC_FROM_HERE, [&] {
+    for (size_t i = 0; i < count; ++i) {
+      const PendingChannelCreate& p = (*pending)[i];
+      if (p.media_type == cricket::MEDIA_TYPE_AUDIO) {
+        created[i] = cm->CreateVoiceChannel(
+            call, media_config, transports[i], configs[i], signaling, p.mid,
+            srtp_required, crypto_options, &ssrc_generator_, audio_options_);
+      } else {
+        created[i] = cm->CreateVideoChannel(
+            call, media_config, transports[i], configs[i], signaling, p.mid,
+            srtp_required, crypto_options, &ssrc_generator_, video_options_,
+            video_bitrate_allocator_factory_.get());
+      }
+    }
+  });
+
+  size_t failed_at = count;
+  for (size_t i = 0; i < count; ++i) {
+    if (!created[i]) {
+      failed_at = i;
+      break;
+    }
+  }
+  if (failed_at != count) {
+    cricket::ChannelManager* cm_undo = channel_manager();
+    worker_thread()->Invoke<void>(RTC_FROM_HERE, [&] {
+      for (size_t i = 0; i < count; ++i) {
+        if (!created[i]) {
+          continue;
+        }
+        if ((*pending)[i].media_type == cricket::MEDIA_TYPE_AUDIO) {
+          cm_undo->DestroyVoiceChannel(
+              static_cast<cricket::VoiceChannel*>(created[i]));
+        } else {
+          cm_undo->DestroyVideoChannel(
+              static_cast<cricket::VideoChannel*>(created[i]));
+        }
+      }
+    });
+    const std::string failed_mid = (*pending)[failed_at].mid;
+    pending->clear();
+    LOG_AND_RETURN_ERROR(RTCErrorType::INTERNAL_ERROR,
+                         "Failed to create channel for mid=" + failed_mid);
+  }
+
+  for (size_t i = 0; i < count; ++i) {
+    const PendingChannelCreate& p = (*pending)[i];
+    if (p.media_type == cricket::MEDIA_TYPE_AUDIO) {
+      auto* ch = static_cast<cricket::VoiceChannel*>(created[i]);
+      ch->SignalDtlsSrtpSetupFailure.connect(
+          this, &PeerConnection::OnDtlsSrtpSetupFailure);
+      ch->SignalSentPacket.connect(this, &PeerConnection::OnSentPacket_w);
+      ch->SetRtpTransport(transports[i]);
+    } else {
+      auto* ch = static_cast<cricket::VideoChannel*>(created[i]);
+      ch->SignalDtlsSrtpSetupFailure.connect(
+          this, &PeerConnection::OnDtlsSrtpSetupFailure);
+      ch->SignalSentPacket.connect(this, &PeerConnection::OnSentPacket_w);
+      ch->SetRtpTransport(transports[i]);
+    }
+    p.transceiver->internal()->SetChannel(created[i]);
+  }
+
+  pending->clear();
   return RTCError::OK();
 }
 
@@ -3570,7 +3665,9 @@ RTCError PeerConnection::UpdateTransceiverChannel(
     rtc::scoped_refptr<RtpTransceiverProxyWithInternal<RtpTransceiver>>
         transceiver,
     const cricket::ContentInfo& content,
-    const cricket::ContentGroup* bundle_group) {
+    const cricket::ContentGroup* bundle_group,
+    std::vector<PendingChannelCreate>* deferred) {
+  RTC_DCHECK(deferred);
   RTC_DCHECK(IsUnifiedPlan());
   RTC_DCHECK(transceiver);
   cricket::ChannelInterface* channel = transceiver->internal()->channel();
@@ -3581,18 +3678,8 @@ RTCError PeerConnection::UpdateTransceiverChannel(
     }
   } else {
     if (!channel) {
-      if (transceiver->media_type() == cricket::MEDIA_TYPE_AUDIO) {
-        channel = CreateVoiceChannel(content.name);
-      } else {
-        RTC_DCHECK_EQ(cricket::MEDIA_TYPE_VIDEO, transceiver->media_type());
-        channel = CreateVideoChannel(content.name);
-      }
-      if (!channel) {
-        LOG_AND_RETURN_ERROR(
-            RTCErrorType::INTERNAL_ERROR,
-            "Failed to create channel for mid=" + content.name);
-      }
-      transceiver->internal()->SetChannel(channel);
+      deferred->push_back(
+          {transceiver, content.name, transceiver->media_type()});
     }
   }
   return RTCError::OK();
@@ -6004,6 +6091,7 @@ RTCError PeerConnection::UpdateSessionState(
   // But all call-sites should be verifying this before calling us!
   RTC_DCHECK(session_error() == SessionError::kNone);
 
+  // If this is answer-ish we're ready to let media flow.
   // If this is answer-ish we're ready to let media flow.
   const bool enable_sending =
       (type == SdpType::kPrAnswer || type == SdpType::kAnswer);
