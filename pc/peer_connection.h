@@ -627,11 +627,24 @@ class PeerConnection : public PeerConnectionInternal,
 
   // Either creates or destroys the transceiver's BaseChannel according to the
   // given media section.
+  struct PendingChannelCreate {
+    rtc::scoped_refptr<RtpTransceiverProxyWithInternal<RtpTransceiver>>
+        transceiver;
+    std::string mid;
+    cricket::MediaType media_type;
+  };
+
   RTCError UpdateTransceiverChannel(
       rtc::scoped_refptr<RtpTransceiverProxyWithInternal<RtpTransceiver>>
           transceiver,
       const cricket::ContentInfo& content,
-      const cricket::ContentGroup* bundle_group) RTC_RUN_ON(signaling_thread());
+      const cricket::ContentGroup* bundle_group,
+      std::vector<PendingChannelCreate>* deferred)
+      RTC_RUN_ON(signaling_thread());
+
+  RTCError FlushPendingChannelCreates(
+      std::vector<PendingChannelCreate>* pending)
+      RTC_RUN_ON(signaling_thread());
 
   // Either creates or destroys the local data channel according to the given
   // media section.
