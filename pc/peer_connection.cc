@@ -2643,9 +2643,6 @@ RTCError PeerConnection::ApplyLocalDescription(
   RTC_DCHECK_RUN_ON(signaling_thread());
   RTC_DCHECK(desc);
 
-  // Update stats here so that we have the most recent stats for tracks and
-  // streams that might be removed by updating the session description.
-  stats_->UpdateStats(kStatsOutputLevelStandard);
 
   // Take a reference to the old local description since it's used below to
   // compare against the new local description. When setting the new local
@@ -3098,9 +3095,6 @@ RTCError PeerConnection::ApplyRemoteDescription(
   RTC_DCHECK_RUN_ON(signaling_thread());
   RTC_DCHECK(desc);
 
-  // Update stats here so that we have the most recent stats for tracks and
-  // streams that might be removed by updating the session description.
-  stats_->UpdateStats(kStatsOutputLevelStandard);
 
   // Take a reference to the old remote description since it's used below to
   // compare against the new remote description. When setting the new remote
@@ -4430,9 +4424,6 @@ const SessionDescriptionInterface* PeerConnection::pending_remote_description()
 void PeerConnection::Close() {
   RTC_DCHECK_RUN_ON(signaling_thread());
   TRACE_EVENT0("webrtc", "PeerConnection::Close");
-  // Update stats here so that we have the most recent stats for tracks and
-  // streams before the channels are closed.
-  stats_->UpdateStats(kStatsOutputLevelStandard);
 
   ChangeSignalingState(PeerConnectionInterface::kClosed);
   NoteUsageEvent(UsageEvent::CLOSE_CALLED);
