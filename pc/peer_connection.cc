@@ -2643,9 +2643,8 @@ RTCError PeerConnection::ApplyLocalDescription(
   RTC_DCHECK_RUN_ON(signaling_thread());
   RTC_DCHECK(desc);
 
-  // Update stats here so that we have the most recent stats for tracks and
-  // streams that might be removed by updating the session description.
-  stats_->UpdateStats(kStatsOutputLevelStandard);
+  // Legacy stats sweep removed: nothing between here and the end of the method reads
+  // the legacy cache, and GetStats refreshes it itself when called.
 
   // Take a reference to the old local description since it's used below to
   // compare against the new local description. When setting the new local
@@ -3899,9 +3898,14 @@ const cricket::ContentInfo* PeerConnection::FindMediaSectionForTransceiver(
         *transceiver->internal()->mid());
   } else {
     // Plan B only allows at most one audio and one video section, so use the
-    // first media section of that type.
-    return cricket::GetFirstMediaContent(sdesc->description()->contents(),
-                                         transceiver->media_type());
+    // first media section of that type. media_type() is PROXY_CONSTMETHOD0 on
+    // the signalling proxy, and PushdownMediaDescription calls this from inside
+    // a worker Invoke that the signalling thread is blocked on, so go through
+    // internal() for the same value without marshalling back into a thread that
+    // is waiting for us.
+    return cricket::GetFirstMediaContent(
+        sdesc->description()->contents(),
+        transceiver->internal()->media_type());
   }
 }
 
@@ -4430,9 +4434,8 @@ const SessionDescriptionInterface* PeerConnection::pending_remote_description()
 void PeerConnection::Close() {
   RTC_DCHECK_RUN_ON(signaling_thread());
   TRACE_EVENT0("webrtc", "PeerConnection::Close");
-  // Update stats here so that we have the most recent stats for tracks and
-  // streams before the channels are closed.
-  stats_->UpdateStats(kStatsOutputLevelStandard);
+  // Legacy stats sweep removed: its only reader is a getStats() after Close(), which
+  // OWT makes unreachable, and GetStats refreshes the cache itself when called.
 
   ChangeSignalingState(PeerConnectionInterface::kClosed);
   NoteUsageEvent(UsageEvent::CLOSE_CALLED);
