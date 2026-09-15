@@ -89,6 +89,7 @@ class VideoRtpReceiver : public rtc::RefCountedObject<RtpReceiverInternal>,
 
   // RtpReceiverInternal implementation.
   void Stop() override;
+  void DetachSinkOnWorker();
   void SetupMediaChannel(uint32_t ssrc) override;
   void SetupUnsignaledMediaChannel() override;
   uint32_t ssrc() const override { return ssrc_.value_or(0); }
@@ -133,6 +134,7 @@ class VideoRtpReceiver : public rtc::RefCountedObject<RtpReceiverInternal>,
   rtc::scoped_refptr<VideoTrackInterface> track_;
   std::vector<rtc::scoped_refptr<MediaStreamInterface>> streams_;
   bool stopped_ = true;
+  bool sink_detached_ = false;
   RtpReceiverObserverInterface* observer_ = nullptr;
   bool received_first_packet_ = false;
   int attachment_id_ = 0;
