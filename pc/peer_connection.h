@@ -639,7 +639,8 @@ class PeerConnection : public PeerConnectionInternal,
           transceiver,
       const cricket::ContentInfo& content,
       const cricket::ContentGroup* bundle_group,
-      std::vector<PendingChannelCreate>* deferred)
+      std::vector<PendingChannelCreate>* deferred,
+      std::vector<cricket::ChannelInterface*>* deferred_destroys)
       RTC_RUN_ON(signaling_thread());
 
   RTCError FlushPendingChannelCreates(
