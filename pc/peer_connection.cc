@@ -3516,6 +3516,18 @@ RTCError PeerConnection::UpdateTransceiversAndDataChannels(
   }
 
   std::vector<PendingChannelCreate> deferred_creates;
+  std::vector<cricket::ChannelInterface*> deferred_destroys;
+  auto destroy_deferred = [this, &deferred_destroys] {
+    if (deferred_destroys.empty()) {
+      return;
+    }
+    worker_thread()->Invoke<void>(RTC_FROM_HERE, [this, &deferred_destroys] {
+      for (cricket::ChannelInterface* ch : deferred_destroys) {
+        DestroyChannelInterface(ch);
+      }
+    });
+    deferred_destroys.clear();
+  };
 
   const ContentInfos& new_contents = new_session.description()->contents();
   for (size_t i = 0; i < new_contents.size(); ++i) {
@@ -3541,13 +3553,16 @@ RTCError PeerConnection::UpdateTransceiversAndDataChannels(
                                old_local_content, old_remote_content);
       if (!transceiver_or_error.ok()) {
         FlushPendingChannelCreates(&deferred_creates).ok();
+        destroy_deferred();
         return transceiver_or_error.MoveError();
       }
       auto transceiver = transceiver_or_error.MoveValue();
-      RTCError error = UpdateTransceiverChannel(transceiver, new_content,
-                                                bundle_group, &deferred_creates);
+      RTCError error =
+          UpdateTransceiverChannel(transceiver, new_content, bundle_group,
+                                   &deferred_creates, &deferred_destroys);
       if (!error.ok()) {
         FlushPendingChannelCreates(&deferred_creates).ok();
+        destroy_deferred();
         return error;
       }
     } else if (media_type == cricket::MEDIA_TYPE_DATA) {
@@ -3560,16 +3575,20 @@ RTCError PeerConnection::UpdateTransceiversAndDataChannels(
       RTCError error = UpdateDataChannel(source, new_content, bundle_group);
       if (!error.ok()) {
         FlushPendingChannelCreates(&deferred_creates).ok();
+        destroy_deferred();
         return error;
       }
     } else {
       FlushPendingChannelCreates(&deferred_creates).ok();
+      destroy_deferred();
       LOG_AND_RETURN_ERROR(RTCErrorType::INTERNAL_ERROR,
                            "Unknown section type.");
     }
   }
 
-  return FlushPendingChannelCreates(&deferred_creates);
+  RTCError flush_error = FlushPendingChannelCreates(&deferred_creates);
+  destroy_deferred();
+  return flush_error;
 }
 
 RTCError PeerConnection::FlushPendingChannelCreates(
@@ -3666,15 +3685,17 @@ RTCError PeerConnection::UpdateTransceiverChannel(
         transceiver,
     const cricket::ContentInfo& content,
     const cricket::ContentGroup* bundle_group,
-    std::vector<PendingChannelCreate>* deferred) {
+    std::vector<PendingChannelCreate>* deferred,
+    std::vector<cricket::ChannelInterface*>* deferred_destroys) {
   RTC_DCHECK(deferred);
+  RTC_DCHECK(deferred_destroys);
   RTC_DCHECK(IsUnifiedPlan());
   RTC_DCHECK(transceiver);
   cricket::ChannelInterface* channel = transceiver->internal()->channel();
   if (content.rejected) {
     if (channel) {
       transceiver->internal()->SetChannel(nullptr);
-      DestroyChannelInterface(channel);
+      deferred_destroys->push_back(channel);
     }
   } else {
     if (!channel) {
