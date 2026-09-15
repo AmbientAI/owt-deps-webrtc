@@ -4528,6 +4528,19 @@ void PeerConnection::Close() {
   ChangeSignalingState(PeerConnectionInterface::kClosed);
   NoteUsageEvent(UsageEvent::CLOSE_CALLED);
 
+  worker_thread()->Invoke<void>(RTC_FROM_HERE, [this] {
+    for (const auto& transceiver : transceivers_) {
+      if (transceiver->internal()->media_type() != cricket::MEDIA_TYPE_VIDEO) {
+        continue;
+      }
+      auto receiver = transceiver->internal()->receiver_internal();
+      if (!receiver) {
+        continue;
+      }
+      static_cast<VideoRtpReceiver*>(receiver.get())->DetachSinkOnWorker();
+    }
+  });
+
   for (const auto& transceiver : transceivers_) {
     transceiver->Stop();
   }
