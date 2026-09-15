@@ -974,7 +974,9 @@ class PeerConnection : public PeerConnectionInternal,
                               const cricket::SessionDescription* description);
   // Push the media parts of the local or remote session description
   // down to all of the channels.
-  RTCError PushdownMediaDescription(SdpType type, cricket::ContentSource source)
+  RTCError PushdownMediaDescription(SdpType type,
+                                    cricket::ContentSource source,
+                                    bool enable_sending = false)
       RTC_RUN_ON(signaling_thread());
 
   RTCError PushdownTransportDescription(cricket::ContentSource source,
