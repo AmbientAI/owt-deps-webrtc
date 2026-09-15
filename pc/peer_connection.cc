@@ -6028,10 +6028,17 @@ RTCError PeerConnection::UpdateSessionState(
               transceivers_.begin(), transceivers_.end(),
               [](const rtc::scoped_refptr<
                   RtpTransceiverProxyWithInternal<RtpTransceiver>>& t) {
-                const auto sender = t->internal()->sender_internal();
-                return t->internal()->stopped() &&
-                       !t->internal()->mid().has_value() &&
-                       (sender == nullptr || sender->track() == nullptr);
+                if (!t->internal()->stopped() ||
+                    t->internal()->mid().has_value()) {
+                  return false;
+                }
+                for (const auto& sender : t->internal()->senders()) {
+                  if (sender->internal() != nullptr &&
+                      sender->internal()->track() != nullptr) {
+                    return false;
+                  }
+                }
+                return true;
               }),
           transceivers_.end());
     }
