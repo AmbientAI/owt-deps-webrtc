@@ -1112,18 +1112,20 @@ PeerConnection::~PeerConnection() {
 }
 
 void PeerConnection::DestroyAllChannels() {
-  // Destroy video channels first since they may have a pointer to a voice
-  // channel.
-  for (const auto& transceiver : transceivers_) {
-    if (transceiver->media_type() == cricket::MEDIA_TYPE_VIDEO) {
-      DestroyTransceiverChannel(transceiver);
+  worker_thread()->Invoke<void>(RTC_FROM_HERE, [this] {
+    // Destroy video channels first since they may have a pointer to a voice
+    // channel.
+    for (const auto& transceiver : transceivers_) {
+      if (transceiver->internal()->media_type() == cricket::MEDIA_TYPE_VIDEO) {
+        DestroyTransceiverChannel(transceiver);
+      }
     }
-  }
-  for (const auto& transceiver : transceivers_) {
-    if (transceiver->media_type() == cricket::MEDIA_TYPE_AUDIO) {
-      DestroyTransceiverChannel(transceiver);
+    for (const auto& transceiver : transceivers_) {
+      if (transceiver->internal()->media_type() == cricket::MEDIA_TYPE_AUDIO) {
+        DestroyTransceiverChannel(transceiver);
+      }
     }
-  }
+  });
   DestroyDataChannelTransport();
 }
 
