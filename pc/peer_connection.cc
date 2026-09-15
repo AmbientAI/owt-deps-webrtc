@@ -6011,6 +6011,38 @@ RTCError PeerConnection::UpdateSessionState(
     ChangeSignalingState(PeerConnectionInterface::kStable);
     transceiver_stable_states_by_transceivers_.clear();
     have_pending_rtp_data_channel_ = false;
+
+    const size_t prune_before = transceivers_.size();
+    size_t prune_m_lines = 0;
+    if (local_description() && local_description()->description()) {
+      prune_m_lines = local_description()->description()->contents().size();
+    }
+    const size_t kPruneMLineMultiplier = 10;
+    const size_t prune_threshold =
+        prune_m_lines ? prune_m_lines * kPruneMLineMultiplier : 0;
+    const bool prune_triggered =
+        prune_threshold && prune_before > prune_threshold;
+    if (prune_triggered) {
+      transceivers_.erase(
+          std::remove_if(
+              transceivers_.begin(), transceivers_.end(),
+              [](const rtc::scoped_refptr<
+                  RtpTransceiverProxyWithInternal<RtpTransceiver>>& t) {
+                const auto sender = t->internal()->sender_internal();
+                return t->internal()->stopped() &&
+                       !t->internal()->mid().has_value() &&
+                       (sender == nullptr || sender->track() == nullptr);
+              }),
+          transceivers_.end());
+    }
+    RTC_LOG(LS_ERROR) << "[CONN-DIAG] event=transceiver_prune"
+                      << " triggered=" << (prune_triggered ? 1 : 0)
+                      << " transceivers_before=" << prune_before
+                      << " transceivers_after=" << transceivers_.size()
+                      << " m_lines=" << prune_m_lines
+                      << " threshold=" << prune_threshold
+                      << " multiplier=" << kPruneMLineMultiplier
+                      << " pruned=" << (prune_before - transceivers_.size());
   }
 
   // Update internal objects according to the session description's media
