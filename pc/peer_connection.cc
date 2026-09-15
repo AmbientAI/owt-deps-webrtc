@@ -4567,11 +4567,16 @@ void PeerConnection::Close() {
       if (transceiver->internal()->media_type() != cricket::MEDIA_TYPE_VIDEO) {
         continue;
       }
-      auto receiver = transceiver->internal()->receiver_internal();
-      if (!receiver) {
-        continue;
+      // receivers(), not receiver_internal(): the latter RTC_CHECKs that there
+      // is exactly one receiver, which is a release-build abort where Plan B
+      // leaves a transceiver with none or several.
+      for (const auto& receiver : transceiver->internal()->receivers()) {
+        RtpReceiverInternal* const internal = receiver->internal();
+        if (internal == nullptr) {
+          continue;
+        }
+        static_cast<VideoRtpReceiver*>(internal)->DetachSinkOnWorker();
       }
-      static_cast<VideoRtpReceiver*>(receiver.get())->DetachSinkOnWorker();
     }
   });
 
