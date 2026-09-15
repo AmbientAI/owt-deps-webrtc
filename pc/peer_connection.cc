@@ -3846,7 +3846,11 @@ rtc::scoped_refptr<RtpTransceiverProxyWithInternal<RtpTransceiver>>
 PeerConnection::GetAssociatedTransceiver(const std::string& mid) const {
   RTC_DCHECK(IsUnifiedPlan());
   for (auto transceiver : transceivers_) {
-    if (transceiver->mid() == mid) {
+    // The proxy mid() is PROXY_CONSTMETHOD0: a ConstMethodCall plus a Marshal
+    // dispatch for every element of the list. internal()->mid() skips both. It
+    // does not skip the copy, since RtpTransceiver::mid() returns the optional
+    // by value either way.
+    if (transceiver->internal()->mid() == mid) {
       return transceiver;
     }
   }
