@@ -6003,9 +6003,8 @@ RTCError PeerConnection::UpdateSessionState(
   RTC_DCHECK(session_error() == SessionError::kNone);
 
   // If this is answer-ish we're ready to let media flow.
-  if (type == SdpType::kPrAnswer || type == SdpType::kAnswer) {
-    EnableSending();
-  }
+  const bool enable_sending =
+      (type == SdpType::kPrAnswer || type == SdpType::kAnswer);
 
   // Update the signaling state according to the specified state machine (see
   // https://w3c.github.io/webrtc-pc/#rtcsignalingstate-enum).
@@ -6026,7 +6025,7 @@ RTCError PeerConnection::UpdateSessionState(
 
   // Update internal objects according to the session description's media
   // descriptions.
-  RTCError error = PushdownMediaDescription(type, source);
+  RTCError error = PushdownMediaDescription(type, source, enable_sending);
   if (!error.ok()) {
     return error;
   }
@@ -6036,32 +6035,48 @@ RTCError PeerConnection::UpdateSessionState(
 
 RTCError PeerConnection::PushdownMediaDescription(
     SdpType type,
-    cricket::ContentSource source) {
+    cricket::ContentSource source,
+    bool enable_sending) {
   const SessionDescriptionInterface* sdesc =
       (source == cricket::CS_LOCAL ? local_description()
                                    : remote_description());
   RTC_DCHECK(sdesc);
 
   // Push down the new SDP media section for each audio/video transceiver.
-  for (const auto& transceiver : transceivers_) {
-    const ContentInfo* content_info =
-        FindMediaSectionForTransceiver(transceiver, sdesc);
-    cricket::ChannelInterface* channel = transceiver->internal()->channel();
-    if (!channel || !content_info || content_info->rejected) {
-      continue;
-    }
-    const MediaContentDescription* content_desc =
-        content_info->media_description();
-    if (!content_desc) {
-      continue;
-    }
-    std::string error;
-    bool success = (source == cricket::CS_LOCAL)
-                       ? channel->SetLocalContent(content_desc, type, &error)
-                       : channel->SetRemoteContent(content_desc, type, &error);
-    if (!success) {
-      LOG_AND_RETURN_ERROR(RTCErrorType::INVALID_PARAMETER, error);
-    }
+  std::string batch_error;
+  const bool batch_ok = worker_thread()->Invoke<bool>(
+      RTC_FROM_HERE, [this, sdesc, type, source, enable_sending, &batch_error] {
+        if (enable_sending) {
+          EnableSending();
+        }
+
+        for (const auto& transceiver : transceivers_) {
+          const ContentInfo* content_info =
+              FindMediaSectionForTransceiver(transceiver, sdesc);
+          cricket::ChannelInterface* channel =
+              transceiver->internal()->channel();
+          if (!channel || !content_info || content_info->rejected) {
+            continue;
+          }
+          const MediaContentDescription* content_desc =
+              content_info->media_description();
+          if (!content_desc) {
+            continue;
+          }
+          std::string error;
+          bool success =
+              (source == cricket::CS_LOCAL)
+                  ? channel->SetLocalContent(content_desc, type, &error)
+                  : channel->SetRemoteContent(content_desc, type, &error);
+          if (!success) {
+            batch_error = error;
+            return false;
+          }
+        }
+        return true;
+      });
+  if (!batch_ok) {
+    LOG_AND_RETURN_ERROR(RTCErrorType::INVALID_PARAMETER, batch_error);
   }
 
   // If using the RtpDataChannel, push down the new SDP section for it too.
