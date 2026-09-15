@@ -3712,7 +3712,7 @@ RTCError PeerConnection::UpdateTransceiverChannel(
   } else {
     if (!channel) {
       deferred->push_back(
-          {transceiver, content.name, transceiver->media_type()});
+          {transceiver, content.name, transceiver->internal()->media_type()});
     }
   }
   return RTCError::OK();
@@ -4023,8 +4023,9 @@ const cricket::ContentInfo* PeerConnection::FindMediaSectionForTransceiver(
   } else {
     // Plan B only allows at most one audio and one video section, so use the
     // first media section of that type.
-    return cricket::GetFirstMediaContent(sdesc->description()->contents(),
-                                         transceiver->media_type());
+    return cricket::GetFirstMediaContent(
+        sdesc->description()->contents(),
+        transceiver->internal()->media_type());
   }
 }
 
