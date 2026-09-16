@@ -118,6 +118,8 @@ class VideoStreamEncoderInterface : public rtc::VideoSinkInterface<VideoFrame> {
   // Permanently stop encoding. After this method has returned, it is
   // guaranteed that no encoded frames will be delivered to the sink.
   virtual void Stop() = 0;
+
+  virtual void StopAsync() {}
 };
 
 }  // namespace webrtc

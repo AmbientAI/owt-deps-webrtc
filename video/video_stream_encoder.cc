@@ -287,8 +287,33 @@ VideoStreamEncoder::~VideoStreamEncoder() {
       << "Must call ::Stop() before destruction.";
 }
 
+void VideoStreamEncoder::StopAsync() {
+  RTC_DCHECK_RUN_ON(&thread_checker_);
+  if (stop_posted_) {
+    return;
+  }
+  stop_posted_ = true;
+  video_source_sink_controller_->SetSource(nullptr);
+  encoder_queue_.PostTask([this] {
+    RTC_DCHECK_RUN_ON(&encoder_queue_);
+    resource_adaptation_processor_->StopResourceAdaptation();
+    rate_allocator_ = nullptr;
+    bitrate_observer_ = nullptr;
+    ReleaseEncoder();
+    shutdown_event_.Set();
+  });
+}
+
 void VideoStreamEncoder::Stop() {
   RTC_DCHECK_RUN_ON(&thread_checker_);
+  if (stop_posted_) {
+    shutdown_event_.Wait(rtc::Event::kForever);
+    return;
+  }
+  // TODO: (atharva) remove when webrtc_optimisations flag is removed; StopAsync
+  // posts the same teardown and this path only remains for callers that never
+  // start it.
+  stop_posted_ = true;
   video_source_sink_controller_->SetSource(nullptr);
   encoder_queue_.PostTask([this] {
     RTC_DCHECK_RUN_ON(&encoder_queue_);

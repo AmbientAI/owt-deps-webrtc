@@ -85,6 +85,7 @@ class VideoStreamEncoder : public VideoStreamEncoderInterface,
   // Permanently stop encoding. After this method has returned, it is
   // guaranteed that no encoded frames will be delivered to the sink.
   void Stop() override;
+  void StopAsync() override;
 
   void SendKeyFrame() override;
 
@@ -196,6 +197,7 @@ class VideoStreamEncoder : public VideoStreamEncoderInterface,
       RTC_RUN_ON(&encoder_queue_);
 
   rtc::Event shutdown_event_;
+  bool stop_posted_ = false;
 
   const uint32_t number_of_cores_;
 

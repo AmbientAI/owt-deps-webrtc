@@ -136,6 +136,8 @@ class WebRtcVideoChannel : public VideoMediaChannel,
       webrtc::VideoBitrateAllocatorFactory* bitrate_allocator_factory);
   ~WebRtcVideoChannel() override;
 
+  void StopEncodersAsync() override;
+
   // VideoMediaChannel implementation
   bool SetSendParameters(const VideoSendParameters& params) override;
   bool SetRecvParameters(const VideoRecvParameters& params) override;
@@ -355,6 +357,8 @@ class WebRtcVideoChannel : public VideoMediaChannel,
                       rtc::VideoSourceInterface<webrtc::VideoFrame>* source);
 
     void SetSend(bool send);
+
+    void StopEncoderAsync();
 
     const std::vector<uint32_t>& GetSsrcs() const;
     VideoSenderInfo GetVideoSenderInfo(bool log_stats);
