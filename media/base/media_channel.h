@@ -883,6 +883,7 @@ class VideoMediaChannel : public MediaChannel, public Delayable {
   ~VideoMediaChannel() override {}
 
   cricket::MediaType media_type() const override;
+  virtual void StopEncodersAsync() {}
   virtual bool SetSendParameters(const VideoSendParameters& params) = 0;
   virtual bool SetRecvParameters(const VideoRecvParameters& params) = 0;
   // Get the receive parameters for the incoming stream identified by |ssrc|.
