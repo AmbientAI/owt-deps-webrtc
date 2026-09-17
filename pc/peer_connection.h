@@ -16,6 +16,8 @@
 #include <set>
 #include <string>
 #include <utility>
+#include <condition_variable>
+#include <mutex>
 #include <vector>
 
 #include "api/peer_connection_interface.h"
@@ -656,6 +658,7 @@ class PeerConnection : public PeerConnectionInternal,
   void DestroyDeferredChannels(
       std::vector<cricket::ChannelInterface*>* channels)
       RTC_RUN_ON(signaling_thread());
+  void DrainPendingChannelDestroys();
 
   RTCError FlushPendingChannelCreates(
       std::vector<PendingChannelCreate>* pending)
@@ -1024,6 +1027,9 @@ class PeerConnection : public PeerConnectionInternal,
 
   // Destroys all BaseChannels and destroys the SCTP data channel, if present.
   void DestroyAllChannels() RTC_RUN_ON(signaling_thread());
+  std::mutex pending_destroys_mutex_;
+  std::condition_variable pending_destroys_cv_;
+  int pending_destroy_batches_ = 0;
 
   // Returns the media index for a local ice candidate given the content name.
   // Returns false if the local session description does not have a media

@@ -1111,6 +1111,11 @@ PeerConnection::~PeerConnection() {
 }
 
 void PeerConnection::DestroyAllChannels() {
+  DrainPendingChannelDestroys();
+  // TODO: (atharva) each channel destroyed below still takes its own blocking
+  // network Invoke inside Deinit. If that hop measures as costly on Close, run
+  // DetachMediaInterface for every channel here, then one network Invoke for
+  // DeinitNetwork_n, then the destroy loop, as DestroyDeferredChannels does.
   worker_thread()->Invoke<void>(RTC_FROM_HERE, [this] {
     // Destroy video channels first since they may have a pointer to a voice
     // channel.
@@ -2644,6 +2649,7 @@ RTCError PeerConnection::ApplyLocalDescription(
     std::unique_ptr<SessionDescriptionInterface> desc) {
   RTC_DCHECK_RUN_ON(signaling_thread());
   RTC_DCHECK(desc);
+  DrainPendingChannelDestroys();
 
   // Update stats here so that we have the most recent stats for tracks and
   // streams that might be removed by updating the session description.
@@ -3099,6 +3105,7 @@ RTCError PeerConnection::ApplyRemoteDescription(
     std::unique_ptr<SessionDescriptionInterface> desc) {
   RTC_DCHECK_RUN_ON(signaling_thread());
   RTC_DCHECK(desc);
+  DrainPendingChannelDestroys();
 
   // Update stats here so that we have the most recent stats for tracks and
   // streams that might be removed by updating the session description.
@@ -3594,12 +3601,37 @@ void PeerConnection::DestroyDeferredChannels(
   if (channels->empty()) {
     return;
   }
-  worker_thread()->Invoke<void>(RTC_FROM_HERE, [this, channels] {
-    for (cricket::ChannelInterface* ch : *channels) {
-      DestroyChannelInterface(ch);
-    }
-  });
+  const std::vector<cricket::ChannelInterface*> batch(channels->begin(),
+                                                      channels->end());
   channels->clear();
+  {
+    std::lock_guard<std::mutex> lock(pending_destroys_mutex_);
+    ++pending_destroy_batches_;
+  }
+  worker_thread()->PostTask(RTC_FROM_HERE, [this, batch] {
+    for (cricket::ChannelInterface* ch : batch) {
+      ch->DetachMediaInterface();
+    }
+    network_thread()->PostTask(RTC_FROM_HERE, [this, batch] {
+      for (cricket::ChannelInterface* ch : batch) {
+        ch->DeinitNetwork_n();
+      }
+      worker_thread()->PostTask(RTC_FROM_HERE, [this, batch] {
+        for (cricket::ChannelInterface* ch : batch) {
+          DestroyChannelInterface(ch);
+        }
+        std::lock_guard<std::mutex> lock(pending_destroys_mutex_);
+        if (--pending_destroy_batches_ == 0) {
+          pending_destroys_cv_.notify_all();
+        }
+      });
+    });
+  });
+}
+
+void PeerConnection::DrainPendingChannelDestroys() {
+  std::unique_lock<std::mutex> lock(pending_destroys_mutex_);
+  pending_destroys_cv_.wait(lock, [this] { return pending_destroy_batches_ == 0; });
 }
 
 RTCError PeerConnection::FlushPendingChannelCreates(
