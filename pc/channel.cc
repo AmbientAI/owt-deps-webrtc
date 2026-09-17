@@ -203,23 +203,41 @@ void BaseChannel::Init_w(
   media_channel_->SetInterface(this, media_transport_config);
 }
 
-void BaseChannel::Deinit() {
+void BaseChannel::DetachMediaInterface() {
   RTC_DCHECK(worker_thread_->IsCurrent());
+  if (media_iface_detached_) {
+    return;
+  }
+  media_iface_detached_ = true;
   media_channel_->SetInterface(/*iface=*/nullptr,
                                webrtc::MediaTransportConfig());
+}
+
+void BaseChannel::DeinitNetwork_n() {
+  RTC_DCHECK(network_thread_->IsCurrent());
+  if (network_deinit_done_) {
+    return;
+  }
+  network_deinit_done_ = true;
+  FlushRtcpMessages_n();
+
+  if (rtp_transport_) {
+    DisconnectFromRtpTransport();
+  }
+  // Clear pending read packets/messages.
+  network_thread_->Clear(&invoker_);
+  network_thread_->Clear(this);
+}
+
+void BaseChannel::Deinit() {
+  RTC_DCHECK(worker_thread_->IsCurrent());
+  DetachMediaInterface();
   // Packets arrive on the network thread, processing packets calls virtual
   // functions, so need to stop this process in Deinit that is called in
   // derived classes destructor.
-  network_thread_->Invoke<void>(RTC_FROM_HERE, [&] {
-    FlushRtcpMessages_n();
-
-    if (rtp_transport_) {
-      DisconnectFromRtpTransport();
-    }
-    // Clear pending read packets/messages.
-    network_thread_->Clear(&invoker_);
-    network_thread_->Clear(this);
-  });
+  if (!network_deinit_done_) {
+    network_thread_->Invoke<void>(RTC_FROM_HERE, [&] { DeinitNetwork_n(); });
+  }
 }
 
 bool BaseChannel::SetRtpTransport(webrtc::RtpTransportInternal* rtp_transport) {

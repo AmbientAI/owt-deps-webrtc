@@ -99,6 +99,8 @@ class BaseChannel : public ChannelInterface,
   // Deinit may be called multiple times and is simply ignored if it's already
   // done.
   void Deinit();
+  void DetachMediaInterface() override;
+  void DeinitNetwork_n() override;
 
   rtc::Thread* worker_thread() const { return worker_thread_; }
   rtc::Thread* network_thread() const { return network_thread_; }
@@ -313,6 +315,8 @@ class BaseChannel : public ChannelInterface,
   // well, but it can be changed only when signaling thread does a synchronous
   // call to the worker thread, so it should be safe.
   bool enabled_ = false;
+  bool media_iface_detached_ = false;
+  bool network_deinit_done_ = false;
   std::vector<StreamParams> local_streams_;
   std::vector<StreamParams> remote_streams_;
   webrtc::RtpTransceiverDirection local_content_direction_ =
