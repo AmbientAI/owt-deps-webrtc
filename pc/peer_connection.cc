@@ -1111,18 +1111,29 @@ PeerConnection::~PeerConnection() {
 }
 
 void PeerConnection::DestroyAllChannels() {
-  worker_thread()->Invoke<void>(RTC_FROM_HERE, [this] {
-    // Destroy video channels first since they may have a pointer to a voice
-    // channel.
-    for (const auto& transceiver : transceivers_) {
-      if (transceiver->internal()->media_type() == cricket::MEDIA_TYPE_VIDEO) {
-        DestroyTransceiverChannel(transceiver);
-      }
+  // Detach on the signaling thread: SetChannel(nullptr) stops the receivers,
+  // whose callees marshal to the signaling thread. Destroy video channels first
+  // since they may have a pointer to a voice channel.
+  std::vector<cricket::ChannelInterface*> video_channels;
+  std::vector<cricket::ChannelInterface*> voice_channels;
+  for (const auto& transceiver : transceivers_) {
+    cricket::ChannelInterface* channel = transceiver->internal()->channel();
+    if (!channel) {
+      continue;
     }
-    for (const auto& transceiver : transceivers_) {
-      if (transceiver->internal()->media_type() == cricket::MEDIA_TYPE_AUDIO) {
-        DestroyTransceiverChannel(transceiver);
-      }
+    transceiver->internal()->SetChannel(nullptr);
+    if (transceiver->internal()->media_type() == cricket::MEDIA_TYPE_VIDEO) {
+      video_channels.push_back(channel);
+    } else {
+      voice_channels.push_back(channel);
+    }
+  }
+  worker_thread()->Invoke<void>(RTC_FROM_HERE, [&] {
+    for (cricket::ChannelInterface* channel : video_channels) {
+      DestroyChannelInterface(channel);
+    }
+    for (cricket::ChannelInterface* channel : voice_channels) {
+      DestroyChannelInterface(channel);
     }
   });
   DestroyDataChannelTransport();
@@ -3624,6 +3635,9 @@ RTCError PeerConnection::FlushPendingChannelCreates(
   rtc::Thread* signaling = signaling_thread();
   const bool srtp_required = SrtpRequired();
   const webrtc::CryptoOptions crypto_options = GetCryptoOptions();
+  // Stops at the first failure, like the per-channel path did: the channels
+  // created before it are attached below and the error is returned for it.
+  size_t failed_at = count;
   worker_thread()->Invoke<void>(RTC_FROM_HERE, [&] {
     for (size_t i = 0; i < count; ++i) {
       const PendingChannelCreate& p = (*pending)[i];
@@ -3637,39 +3651,14 @@ RTCError PeerConnection::FlushPendingChannelCreates(
             srtp_required, crypto_options, &ssrc_generator_, video_options_,
             video_bitrate_allocator_factory_.get());
       }
+      if (!created[i]) {
+        failed_at = i;
+        break;
+      }
     }
   });
 
-  size_t failed_at = count;
-  for (size_t i = 0; i < count; ++i) {
-    if (!created[i]) {
-      failed_at = i;
-      break;
-    }
-  }
-  if (failed_at != count) {
-    cricket::ChannelManager* cm_undo = channel_manager();
-    worker_thread()->Invoke<void>(RTC_FROM_HERE, [&] {
-      for (size_t i = 0; i < count; ++i) {
-        if (!created[i]) {
-          continue;
-        }
-        if ((*pending)[i].media_type == cricket::MEDIA_TYPE_AUDIO) {
-          cm_undo->DestroyVoiceChannel(
-              static_cast<cricket::VoiceChannel*>(created[i]));
-        } else {
-          cm_undo->DestroyVideoChannel(
-              static_cast<cricket::VideoChannel*>(created[i]));
-        }
-      }
-    });
-    const std::string failed_mid = (*pending)[failed_at].mid;
-    pending->clear();
-    LOG_AND_RETURN_ERROR(RTCErrorType::INTERNAL_ERROR,
-                         "Failed to create channel for mid=" + failed_mid);
-  }
-
-  for (size_t i = 0; i < count; ++i) {
+  for (size_t i = 0; i < failed_at; ++i) {
     const PendingChannelCreate& p = (*pending)[i];
     if (p.media_type == cricket::MEDIA_TYPE_AUDIO) {
       auto* ch = static_cast<cricket::VoiceChannel*>(created[i]);
@@ -3685,6 +3674,13 @@ RTCError PeerConnection::FlushPendingChannelCreates(
       ch->SetRtpTransport(transports[i]);
     }
     p.transceiver->internal()->SetChannel(created[i]);
+  }
+
+  if (failed_at != count) {
+    const std::string failed_mid = (*pending)[failed_at].mid;
+    pending->clear();
+    LOG_AND_RETURN_ERROR(RTCErrorType::INTERNAL_ERROR,
+                         "Failed to create channel for mid=" + failed_mid);
   }
 
   pending->clear();
