@@ -1020,10 +1020,9 @@ class PeerConnection : public PeerConnectionInternal,
   // Enables media channels to allow sending of media.
   // This enables media to flow on all configured audio/video channels and the
   // RtpDataChannel.
-  // It has the signaling_thread check but can be run on the worker thread: its
-  // only caller is PushdownMediaDescription's worker Invoke, during which the
-  // signaling thread is blocked.
-  void EnableSending() RTC_RUN_ON(signaling_thread());
+  // Runs on the worker thread, from PushdownMediaDescription's Invoke, during
+  // which the signaling thread is blocked.
+  void EnableSending();
 
   // Destroys all BaseChannels and destroys the SCTP data channel, if present.
   void DestroyAllChannels() RTC_RUN_ON(signaling_thread());
