@@ -627,11 +627,39 @@ class PeerConnection : public PeerConnectionInternal,
 
   // Either creates or destroys the transceiver's BaseChannel according to the
   // given media section.
+  struct PendingChannelCreate {
+    rtc::scoped_refptr<RtpTransceiverProxyWithInternal<RtpTransceiver>>
+        transceiver;
+    std::string mid;
+    cricket::MediaType media_type;
+  };
+
   RTCError UpdateTransceiverChannel(
       rtc::scoped_refptr<RtpTransceiverProxyWithInternal<RtpTransceiver>>
           transceiver,
       const cricket::ContentInfo& content,
-      const cricket::ContentGroup* bundle_group) RTC_RUN_ON(signaling_thread());
+      const cricket::ContentGroup* bundle_group,
+      std::vector<PendingChannelCreate>* deferred,
+      std::vector<cricket::ChannelInterface*>* deferred_destroys)
+      RTC_RUN_ON(signaling_thread());
+
+  RTCError UpdateSessionContents(
+      cricket::ContentSource source,
+      const SessionDescriptionInterface& new_session,
+      const SessionDescriptionInterface* old_local_description,
+      const SessionDescriptionInterface* old_remote_description,
+      const cricket::ContentGroup* bundle_group,
+      std::vector<PendingChannelCreate>* deferred_creates,
+      std::vector<cricket::ChannelInterface*>* deferred_destroys)
+      RTC_RUN_ON(signaling_thread());
+
+  void DestroyDeferredChannels(
+      std::vector<cricket::ChannelInterface*>* channels)
+      RTC_RUN_ON(signaling_thread());
+
+  RTCError FlushPendingChannelCreates(
+      std::vector<PendingChannelCreate>* pending)
+      RTC_RUN_ON(signaling_thread());
 
   // Either creates or destroys the local data channel according to the given
   // media section.
@@ -974,7 +1002,9 @@ class PeerConnection : public PeerConnectionInternal,
                               const cricket::SessionDescription* description);
   // Push the media parts of the local or remote session description
   // down to all of the channels.
-  RTCError PushdownMediaDescription(SdpType type, cricket::ContentSource source)
+  RTCError PushdownMediaDescription(SdpType type,
+                                    cricket::ContentSource source,
+                                    bool enable_sending = false)
       RTC_RUN_ON(signaling_thread());
 
   RTCError PushdownTransportDescription(cricket::ContentSource source,
@@ -990,7 +1020,9 @@ class PeerConnection : public PeerConnectionInternal,
   // Enables media channels to allow sending of media.
   // This enables media to flow on all configured audio/video channels and the
   // RtpDataChannel.
-  void EnableSending() RTC_RUN_ON(signaling_thread());
+  // Runs on the worker thread, from PushdownMediaDescription's Invoke, during
+  // which the signaling thread is blocked.
+  void EnableSending();
 
   // Destroys all BaseChannels and destroys the SCTP data channel, if present.
   void DestroyAllChannels() RTC_RUN_ON(signaling_thread());
