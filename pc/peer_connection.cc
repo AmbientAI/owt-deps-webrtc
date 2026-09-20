@@ -11,6 +11,7 @@
 #include "pc/peer_connection.h"
 
 #include <algorithm>
+#include <atomic>
 #include <limits>
 #include <memory>
 #include <queue>
@@ -80,6 +81,20 @@ using cricket::RELAY_PORT_TYPE;
 using cricket::STUN_PORT_TYPE;
 
 namespace webrtc {
+
+namespace {
+std::atomic<bool> g_message_execution_optimization{false};
+}  // namespace
+
+extern "C" void AmbientSetWebrtcMessageExecutionOptimizationEnabled(bool enabled) {
+  g_message_execution_optimization.store(enabled, std::memory_order_relaxed);
+}
+
+namespace proxy_internal {
+bool MessageExecutionOptimizationEnabled() {
+  return g_message_execution_optimization.load(std::memory_order_relaxed);
+}
+}  // namespace proxy_internal
 
 // Error messages
 const char kBundleWithoutRtcpMux[] =
@@ -2643,6 +2658,9 @@ RTCError PeerConnection::ApplyLocalDescription(
   RTC_DCHECK_RUN_ON(signaling_thread());
   RTC_DCHECK(desc);
 
+  if (!proxy_internal::MessageExecutionOptimizationEnabled()) {
+    stats_->UpdateStats(kStatsOutputLevelStandard);
+  }
 
   // Take a reference to the old local description since it's used below to
   // compare against the new local description. When setting the new local
@@ -3095,6 +3113,9 @@ RTCError PeerConnection::ApplyRemoteDescription(
   RTC_DCHECK_RUN_ON(signaling_thread());
   RTC_DCHECK(desc);
 
+  if (!proxy_internal::MessageExecutionOptimizationEnabled()) {
+    stats_->UpdateStats(kStatsOutputLevelStandard);
+  }
 
   // Take a reference to the old remote description since it's used below to
   // compare against the new remote description. When setting the new remote
@@ -4424,6 +4445,10 @@ const SessionDescriptionInterface* PeerConnection::pending_remote_description()
 void PeerConnection::Close() {
   RTC_DCHECK_RUN_ON(signaling_thread());
   TRACE_EVENT0("webrtc", "PeerConnection::Close");
+
+  if (!proxy_internal::MessageExecutionOptimizationEnabled()) {
+    stats_->UpdateStats(kStatsOutputLevelStandard);
+  }
 
   ChangeSignalingState(PeerConnectionInterface::kClosed);
   NoteUsageEvent(UsageEvent::CLOSE_CALLED);
@@ -6021,7 +6046,8 @@ RTCError PeerConnection::UpdateSessionState(
     const size_t prune_threshold =
         prune_m_lines ? prune_m_lines * kPruneMLineMultiplier : 0;
     const bool prune_triggered =
-        prune_threshold && prune_before > prune_threshold;
+        proxy_internal::MessageExecutionOptimizationEnabled() && prune_threshold &&
+        prune_before > prune_threshold;
     if (prune_triggered) {
       transceivers_.erase(
           std::remove_if(
@@ -6042,14 +6068,16 @@ RTCError PeerConnection::UpdateSessionState(
               }),
           transceivers_.end());
     }
-    RTC_LOG(LS_ERROR) << "[CONN-DIAG] event=transceiver_prune"
-                      << " triggered=" << (prune_triggered ? 1 : 0)
-                      << " transceivers_before=" << prune_before
-                      << " transceivers_after=" << transceivers_.size()
-                      << " m_lines=" << prune_m_lines
-                      << " threshold=" << prune_threshold
-                      << " multiplier=" << kPruneMLineMultiplier
-                      << " pruned=" << (prune_before - transceivers_.size());
+    if (proxy_internal::MessageExecutionOptimizationEnabled()) {
+      RTC_LOG(LS_ERROR) << "[CONN-DIAG] event=transceiver_prune"
+                        << " triggered=" << (prune_triggered ? 1 : 0)
+                        << " transceivers_before=" << prune_before
+                        << " transceivers_after=" << transceivers_.size()
+                        << " m_lines=" << prune_m_lines
+                        << " threshold=" << prune_threshold
+                        << " multiplier=" << kPruneMLineMultiplier
+                        << " pruned=" << (prune_before - transceivers_.size());
+    }
   }
 
   // Update internal objects according to the session description's media
