@@ -1112,6 +1112,22 @@ PeerConnection::~PeerConnection() {
 }
 
 void PeerConnection::DestroyAllChannels() {
+  if (!AmbientFlags::MessageExecutionOptimization()) {
+    // Destroy video channels first since they may have a pointer to a voice
+    // channel.
+    for (const auto& transceiver : transceivers_) {
+      if (transceiver->media_type() == cricket::MEDIA_TYPE_VIDEO) {
+        DestroyTransceiverChannel(transceiver);
+      }
+    }
+    for (const auto& transceiver : transceivers_) {
+      if (transceiver->media_type() == cricket::MEDIA_TYPE_AUDIO) {
+        DestroyTransceiverChannel(transceiver);
+      }
+    }
+    DestroyDataChannelTransport();
+    return;
+  }
   // Detach on the signaling thread: SetChannel(nullptr) stops the receivers,
   // whose callees marshal to the signaling thread. Destroy video channels first
   // since they may have a pointer to a voice channel.
@@ -3700,6 +3716,30 @@ RTCError PeerConnection::UpdateTransceiverChannel(
   RTC_DCHECK(IsUnifiedPlan());
   RTC_DCHECK(transceiver);
   cricket::ChannelInterface* channel = transceiver->internal()->channel();
+  if (!AmbientFlags::MessageExecutionOptimization()) {
+    if (content.rejected) {
+      if (channel) {
+        transceiver->internal()->SetChannel(nullptr);
+        DestroyChannelInterface(channel);
+      }
+    } else {
+      if (!channel) {
+        if (transceiver->media_type() == cricket::MEDIA_TYPE_AUDIO) {
+          channel = CreateVoiceChannel(content.name);
+        } else {
+          RTC_DCHECK_EQ(cricket::MEDIA_TYPE_VIDEO, transceiver->media_type());
+          channel = CreateVideoChannel(content.name);
+        }
+        if (!channel) {
+          LOG_AND_RETURN_ERROR(
+              RTCErrorType::INTERNAL_ERROR,
+              "Failed to create channel for mid=" + content.name);
+        }
+        transceiver->internal()->SetChannel(channel);
+      }
+    }
+    return RTCError::OK();
+  }
   if (content.rejected) {
     if (channel) {
       transceiver->internal()->SetChannel(nullptr);
@@ -4558,23 +4598,25 @@ void PeerConnection::Close() {
   ChangeSignalingState(PeerConnectionInterface::kClosed);
   NoteUsageEvent(UsageEvent::CLOSE_CALLED);
 
-  worker_thread()->Invoke<void>(RTC_FROM_HERE, [this] {
-    for (const auto& transceiver : transceivers_) {
-      if (transceiver->internal()->media_type() != cricket::MEDIA_TYPE_VIDEO) {
-        continue;
-      }
-      // receivers(), not receiver_internal(): the latter RTC_CHECKs that there
-      // is exactly one receiver, which is a release-build abort where Plan B
-      // leaves a transceiver with none or several.
-      for (const auto& receiver : transceiver->internal()->receivers()) {
-        RtpReceiverInternal* const internal = receiver->internal();
-        if (internal == nullptr) {
+  if (AmbientFlags::MessageExecutionOptimization()) {
+    worker_thread()->Invoke<void>(RTC_FROM_HERE, [this] {
+      for (const auto& transceiver : transceivers_) {
+        if (transceiver->internal()->media_type() != cricket::MEDIA_TYPE_VIDEO) {
           continue;
         }
-        static_cast<VideoRtpReceiver*>(internal)->DetachSinkOnWorker();
+        // receivers(), not receiver_internal(): the latter RTC_CHECKs that there
+        // is exactly one receiver, which is a release-build abort where Plan B
+        // leaves a transceiver with none or several.
+        for (const auto& receiver : transceiver->internal()->receivers()) {
+          RtpReceiverInternal* const internal = receiver->internal();
+          if (internal == nullptr) {
+            continue;
+          }
+          static_cast<VideoRtpReceiver*>(internal)->DetachSinkOnWorker();
+        }
       }
-    }
-  });
+    });
+  }
 
   for (const auto& transceiver : transceivers_) {
     transceiver->Stop();
@@ -6140,9 +6182,11 @@ RTCError PeerConnection::UpdateSessionState(
   RTC_DCHECK(session_error() == SessionError::kNone);
 
   // If this is answer-ish we're ready to let media flow.
-  // If this is answer-ish we're ready to let media flow.
   const bool enable_sending =
       (type == SdpType::kPrAnswer || type == SdpType::kAnswer);
+  if (enable_sending && !AmbientFlags::MessageExecutionOptimization()) {
+    EnableSending();
+  }
 
   // Update the signaling state according to the specified state machine (see
   // https://w3c.github.io/webrtc-pc/#rtcsignalingstate-enum).
@@ -6223,40 +6267,63 @@ RTCError PeerConnection::PushdownMediaDescription(
   RTC_DCHECK(sdesc);
 
   // Push down the new SDP media section for each audio/video transceiver.
-  std::string batch_error;
-  const bool batch_ok = worker_thread()->Invoke<bool>(
-      RTC_FROM_HERE, [this, sdesc, type, source, enable_sending, &batch_error] {
-        if (enable_sending) {
-          EnableSending();
-        }
+  if (!AmbientFlags::MessageExecutionOptimization()) {
+    for (const auto& transceiver : transceivers_) {
+      const ContentInfo* content_info =
+          FindMediaSectionForTransceiver(transceiver, sdesc);
+      cricket::ChannelInterface* channel = transceiver->internal()->channel();
+      if (!channel || !content_info || content_info->rejected) {
+        continue;
+      }
+      const MediaContentDescription* content_desc =
+          content_info->media_description();
+      if (!content_desc) {
+        continue;
+      }
+      std::string error;
+      bool success = (source == cricket::CS_LOCAL)
+                         ? channel->SetLocalContent(content_desc, type, &error)
+                         : channel->SetRemoteContent(content_desc, type, &error);
+      if (!success) {
+        LOG_AND_RETURN_ERROR(RTCErrorType::INVALID_PARAMETER, error);
+      }
+    }
+  } else {
+    std::string batch_error;
+    const bool batch_ok = worker_thread()->Invoke<bool>(
+        RTC_FROM_HERE, [this, sdesc, type, source, enable_sending, &batch_error] {
+          if (enable_sending) {
+            EnableSending();
+          }
 
-        for (const auto& transceiver : transceivers_) {
-          const ContentInfo* content_info =
-              FindMediaSectionForTransceiver(transceiver, sdesc);
-          cricket::ChannelInterface* channel =
-              transceiver->internal()->channel();
-          if (!channel || !content_info || content_info->rejected) {
-            continue;
+          for (const auto& transceiver : transceivers_) {
+            const ContentInfo* content_info =
+                FindMediaSectionForTransceiver(transceiver, sdesc);
+            cricket::ChannelInterface* channel =
+                transceiver->internal()->channel();
+            if (!channel || !content_info || content_info->rejected) {
+              continue;
+            }
+            const MediaContentDescription* content_desc =
+                content_info->media_description();
+            if (!content_desc) {
+              continue;
+            }
+            std::string error;
+            bool success =
+                (source == cricket::CS_LOCAL)
+                    ? channel->SetLocalContent(content_desc, type, &error)
+                    : channel->SetRemoteContent(content_desc, type, &error);
+            if (!success) {
+              batch_error = error;
+              return false;
+            }
           }
-          const MediaContentDescription* content_desc =
-              content_info->media_description();
-          if (!content_desc) {
-            continue;
-          }
-          std::string error;
-          bool success =
-              (source == cricket::CS_LOCAL)
-                  ? channel->SetLocalContent(content_desc, type, &error)
-                  : channel->SetRemoteContent(content_desc, type, &error);
-          if (!success) {
-            batch_error = error;
-            return false;
-          }
-        }
-        return true;
-      });
-  if (!batch_ok) {
-    LOG_AND_RETURN_ERROR(RTCErrorType::INVALID_PARAMETER, batch_error);
+          return true;
+        });
+    if (!batch_ok) {
+      LOG_AND_RETURN_ERROR(RTCErrorType::INVALID_PARAMETER, batch_error);
+    }
   }
 
   // If using the RtpDataChannel, push down the new SDP section for it too.
