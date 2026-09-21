@@ -116,21 +116,31 @@ void VideoRtpReceiver::SetDepacketizerToDecoderFrameTransformer(
   });
 }
 
+void VideoRtpReceiver::DetachSinkOnWorker() {
+  if (stopped_ || !media_channel_) {
+    return;
+  }
+  SetSink(nullptr);
+  sink_detached_ = true;
+}
+
 void VideoRtpReceiver::Stop() {
   // TODO(deadbeef): Need to do more here to fully stop receiving packets.
   if (stopped_) {
     return;
   }
   source_->SetState(MediaSourceInterface::kEnded);
-  if (!media_channel_) {
-    RTC_LOG(LS_WARNING) << "VideoRtpReceiver::Stop: No video channel exists.";
-  } else {
-    // Allow that SetSink fails. This is the normal case when the underlying
-    // media channel has already been deleted.
-    worker_thread_->Invoke<void>(RTC_FROM_HERE, [&] {
-      RTC_DCHECK_RUN_ON(worker_thread_);
-      SetSink(nullptr);
-    });
+  if (!sink_detached_) {
+    if (!media_channel_) {
+      RTC_LOG(LS_WARNING) << "VideoRtpReceiver::Stop: No video channel exists.";
+    } else {
+      // Allow that SetSink fails. This is the normal case when the underlying
+      // media channel has already been deleted.
+      worker_thread_->Invoke<void>(RTC_FROM_HERE, [&] {
+        RTC_DCHECK_RUN_ON(worker_thread_);
+        SetSink(nullptr);
+      });
+    }
   }
   delay_->OnStop();
   stopped_ = true;
