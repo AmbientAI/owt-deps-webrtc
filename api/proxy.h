@@ -62,6 +62,7 @@
 #include "rtc_base/message_handler.h"
 #include "rtc_base/ref_counted_object.h"
 #include "rtc_base/system/rtc_export.h"
+#include "api/ambient_flags.h"
 #include "rtc_base/thread.h"
 
 namespace rtc {
@@ -289,15 +290,9 @@ class ConstMethodCall : public rtc::Message, public rtc::MessageHandler {
                                                                     \
  public:  // NOLINTNEXTLINE
 
-namespace proxy_internal {
-// Set from the appliance (NodeConfig webrtc_message_execution_optimization)
-// through AmbientSetWebrtcMessageExecutionOptimizationEnabled. Defaults to off.
-bool MessageExecutionOptimizationEnabled();
-}  // namespace proxy_internal
-
 #define PROXY_METHOD0(r, method)                           \
   r method() override {                                    \
-    if (proxy_internal::MessageExecutionOptimizationEnabled() && signaling_thread_->IsCurrent())                    \
+    if (AmbientFlags::MessageExecutionOptimization() && signaling_thread_->IsCurrent())                    \
       return c_->method();                                 \
     MethodCall<C, r> call(c_, &C::method);                 \
     return call.Marshal(RTC_FROM_HERE, signaling_thread_); \
@@ -305,7 +300,7 @@ bool MessageExecutionOptimizationEnabled();
 
 #define PROXY_CONSTMETHOD0(r, method)                      \
   r method() const override {                              \
-    if (proxy_internal::MessageExecutionOptimizationEnabled() && signaling_thread_->IsCurrent())                    \
+    if (AmbientFlags::MessageExecutionOptimization() && signaling_thread_->IsCurrent())                    \
       return c_->method();                                 \
     ConstMethodCall<C, r> call(c_, &C::method);            \
     return call.Marshal(RTC_FROM_HERE, signaling_thread_); \
@@ -356,7 +351,7 @@ bool MessageExecutionOptimizationEnabled();
 // Define methods which should be invoked on the worker thread.
 #define PROXY_WORKER_METHOD0(r, method)                 \
   r method() override {                                 \
-    if (proxy_internal::MessageExecutionOptimizationEnabled() && worker_thread_->IsCurrent())                    \
+    if (AmbientFlags::MessageExecutionOptimization() && worker_thread_->IsCurrent())                    \
       return c_->method();                              \
     MethodCall<C, r> call(c_, &C::method);              \
     return call.Marshal(RTC_FROM_HERE, worker_thread_); \
@@ -364,7 +359,7 @@ bool MessageExecutionOptimizationEnabled();
 
 #define PROXY_WORKER_CONSTMETHOD0(r, method)            \
   r method() const override {                           \
-    if (proxy_internal::MessageExecutionOptimizationEnabled() && worker_thread_->IsCurrent())                    \
+    if (AmbientFlags::MessageExecutionOptimization() && worker_thread_->IsCurrent())                    \
       return c_->method();                              \
     ConstMethodCall<C, r> call(c_, &C::method);         \
     return call.Marshal(RTC_FROM_HERE, worker_thread_); \

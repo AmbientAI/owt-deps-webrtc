@@ -11,7 +11,6 @@
 #include "pc/peer_connection.h"
 
 #include <algorithm>
-#include <atomic>
 #include <limits>
 #include <memory>
 #include <queue>
@@ -21,6 +20,7 @@
 
 #include "absl/algorithm/container.h"
 #include "absl/strings/match.h"
+#include "api/ambient_flags.h"
 #include "api/jsep_ice_candidate.h"
 #include "api/jsep_session_description.h"
 #include "api/media_stream_proxy.h"
@@ -81,20 +81,6 @@ using cricket::RELAY_PORT_TYPE;
 using cricket::STUN_PORT_TYPE;
 
 namespace webrtc {
-
-namespace {
-std::atomic<bool> g_message_execution_optimization{false};
-}  // namespace
-
-extern "C" void AmbientSetWebrtcMessageExecutionOptimizationEnabled(bool enabled) {
-  g_message_execution_optimization.store(enabled, std::memory_order_relaxed);
-}
-
-namespace proxy_internal {
-bool MessageExecutionOptimizationEnabled() {
-  return g_message_execution_optimization.load(std::memory_order_relaxed);
-}
-}  // namespace proxy_internal
 
 // Error messages
 const char kBundleWithoutRtcpMux[] =
@@ -2658,7 +2644,7 @@ RTCError PeerConnection::ApplyLocalDescription(
   RTC_DCHECK_RUN_ON(signaling_thread());
   RTC_DCHECK(desc);
 
-  if (!proxy_internal::MessageExecutionOptimizationEnabled()) {
+  if (!AmbientFlags::MessageExecutionOptimization()) {
     stats_->UpdateStats(kStatsOutputLevelStandard);
   }
 
@@ -3113,7 +3099,7 @@ RTCError PeerConnection::ApplyRemoteDescription(
   RTC_DCHECK_RUN_ON(signaling_thread());
   RTC_DCHECK(desc);
 
-  if (!proxy_internal::MessageExecutionOptimizationEnabled()) {
+  if (!AmbientFlags::MessageExecutionOptimization()) {
     stats_->UpdateStats(kStatsOutputLevelStandard);
   }
 
@@ -4446,7 +4432,7 @@ void PeerConnection::Close() {
   RTC_DCHECK_RUN_ON(signaling_thread());
   TRACE_EVENT0("webrtc", "PeerConnection::Close");
 
-  if (!proxy_internal::MessageExecutionOptimizationEnabled()) {
+  if (!AmbientFlags::MessageExecutionOptimization()) {
     stats_->UpdateStats(kStatsOutputLevelStandard);
   }
 
@@ -6046,7 +6032,7 @@ RTCError PeerConnection::UpdateSessionState(
     const size_t prune_threshold =
         prune_m_lines ? prune_m_lines * kPruneMLineMultiplier : 0;
     const bool prune_triggered =
-        proxy_internal::MessageExecutionOptimizationEnabled() && prune_threshold &&
+        AmbientFlags::MessageExecutionOptimization() && prune_threshold &&
         prune_before > prune_threshold;
     if (prune_triggered) {
       transceivers_.erase(
@@ -6068,7 +6054,7 @@ RTCError PeerConnection::UpdateSessionState(
               }),
           transceivers_.end());
     }
-    if (proxy_internal::MessageExecutionOptimizationEnabled()) {
+    if (AmbientFlags::MessageExecutionOptimization()) {
       RTC_LOG(LS_ERROR) << "[CONN-DIAG] event=transceiver_prune"
                         << " triggered=" << (prune_triggered ? 1 : 0)
                         << " transceivers_before=" << prune_before
