@@ -4059,6 +4059,10 @@ const cricket::ContentInfo* PeerConnection::FindMediaSectionForTransceiver(
   } else {
     // Plan B only allows at most one audio and one video section, so use the
     // first media section of that type.
+    if (!AmbientFlags::MessageExecutionOptimization()) {
+      return cricket::GetFirstMediaContent(sdesc->description()->contents(),
+                                           transceiver->media_type());
+    }
     return cricket::GetFirstMediaContent(
         sdesc->description()->contents(),
         transceiver->internal()->media_type());
