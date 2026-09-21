@@ -99,6 +99,7 @@ class BaseChannel : public ChannelInterface,
   // Deinit may be called multiple times and is simply ignored if it's already
   // done.
   void Deinit();
+  void DisableMedia_w() override;
 
   rtc::Thread* worker_thread() const { return worker_thread_; }
   rtc::Thread* network_thread() const { return network_thread_; }
@@ -217,7 +218,6 @@ class BaseChannel : public ChannelInterface,
                   const rtc::PacketOptions& options);
 
   void EnableMedia_w();
-  void DisableMedia_w();
 
   // Performs actions if the RTP/RTCP writable state changed. This should
   // be called whenever a channel's writable state changes or when RTCP muxing

@@ -638,6 +638,13 @@ WebRtcVideoChannel::WebRtcVideoChannel(
       recv_codecs_.empty() ? 0 : recv_codecs_.front().flexfec_payload_type;
 }
 
+void WebRtcVideoChannel::StopEncodersAsync() {
+  RTC_DCHECK_RUN_ON(&thread_checker_);
+  for (const auto& kv : send_streams_) {
+    kv.second->StopEncoderAsync();
+  }
+}
+
 WebRtcVideoChannel::~WebRtcVideoChannel() {
   for (auto& kv : send_streams_)
     delete kv.second;
@@ -2412,6 +2419,13 @@ void WebRtcVideoChannel::WebRtcVideoSendStream::ReconfigureEncoder() {
   encoder_config.encoder_specific_settings = NULL;
 
   parameters_.encoder_config = std::move(encoder_config);
+}
+
+void WebRtcVideoChannel::WebRtcVideoSendStream::StopEncoderAsync() {
+  RTC_DCHECK_RUN_ON(&thread_checker_);
+  if (stream_ != nullptr) {
+    stream_->StopEncoderAsync();
+  }
 }
 
 void WebRtcVideoChannel::WebRtcVideoSendStream::SetSend(bool send) {

@@ -64,6 +64,8 @@ class ChannelInterface {
   //   * A DtlsSrtpTransport for DTLS-SRTP.
   virtual bool SetRtpTransport(webrtc::RtpTransportInternal* rtp_transport) = 0;
 
+  virtual void DisableMedia_w() {}
+
  protected:
   virtual ~ChannelInterface() = default;
 };

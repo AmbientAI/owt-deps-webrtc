@@ -287,18 +287,34 @@ VideoStreamEncoder::~VideoStreamEncoder() {
       << "Must call ::Stop() before destruction.";
 }
 
-void VideoStreamEncoder::Stop() {
+
+void VideoStreamEncoder::PostStopTask() {
   RTC_DCHECK_RUN_ON(&thread_checker_);
+  stop_posted_ = true;
   video_source_sink_controller_->SetSource(nullptr);
   encoder_queue_.PostTask([this] {
     RTC_DCHECK_RUN_ON(&encoder_queue_);
+    stopped_ = true;
     resource_adaptation_processor_->StopResourceAdaptation();
     rate_allocator_ = nullptr;
     bitrate_observer_ = nullptr;
     ReleaseEncoder();
     shutdown_event_.Set();
   });
+}
 
+void VideoStreamEncoder::StopAsync() {
+  RTC_DCHECK_RUN_ON(&thread_checker_);
+  if (!stop_posted_) {
+    PostStopTask();
+  }
+}
+
+void VideoStreamEncoder::Stop() {
+  RTC_DCHECK_RUN_ON(&thread_checker_);
+  if (!stop_posted_) {
+    PostStopTask();
+  }
   shutdown_event_.Wait(rtc::Event::kForever);
 }
 
@@ -978,6 +994,9 @@ void VideoStreamEncoder::SetEncoderRates(
 void VideoStreamEncoder::MaybeEncodeVideoFrame(const VideoFrame& video_frame,
                                                int64_t time_when_posted_us) {
   RTC_DCHECK_RUN_ON(&encoder_queue_);
+  if (stopped_) {
+    return;
+  }
   resource_adaptation_processor_->OnFrame(video_frame);
 
   if (!last_frame_info_ || video_frame.width() != last_frame_info_->width ||
@@ -1565,6 +1584,9 @@ void VideoStreamEncoder::OnBitrateUpdated(DataRate target_bitrate,
     return;
   }
   RTC_DCHECK_RUN_ON(&encoder_queue_);
+  if (stopped_) {
+    return;
+  }
 
   const bool video_is_suspended = target_bitrate == DataRate::Zero();
   const bool video_suspension_changed = video_is_suspended != EncoderPaused();

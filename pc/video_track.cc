@@ -10,13 +10,18 @@
 
 #include "pc/video_track.h"
 
+#include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
+#include "api/ambient_flags.h"
 #include "api/notifier.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/location.h"
+#include "rtc_base/logging.h"
 #include "rtc_base/ref_counted_object.h"
+#include "rtc_base/thread.h"
 
 namespace webrtc {
 
@@ -30,8 +35,36 @@ VideoTrack::VideoTrack(const std::string& label,
   video_source_->RegisterObserver(this);
 }
 
+namespace {
+rtc::Thread* VideoSourceReleaseThread() {
+  static rtc::Thread* const thread = [] {
+    std::unique_ptr<rtc::Thread> t = rtc::Thread::Create();
+    t->SetName("VideoSourceRelease", nullptr);
+    if (!t->Start()) {
+      RTC_LOG(LS_ERROR) << "Failed to start the video source release thread";
+      return static_cast<rtc::Thread*>(nullptr);
+    }
+    return t.release();
+  }();
+  return thread;
+}
+}  // namespace
+
 VideoTrack::~VideoTrack() {
   video_source_->UnregisterObserver(this);
+  if (!AmbientFlags::MessageExecutionOptimization()) {
+    return;
+  }
+
+  rtc::scoped_refptr<VideoTrackSourceInterface> source = video_source_;
+  video_source_ = nullptr;
+  rtc::Thread* const release_thread = VideoSourceReleaseThread();
+  if (release_thread == nullptr) {
+    return;
+  }
+  release_thread->PostTask(RTC_FROM_HERE, [source = std::move(source)]() mutable {
+    source = nullptr;
+  });
 }
 
 std::string VideoTrack::kind() const {
