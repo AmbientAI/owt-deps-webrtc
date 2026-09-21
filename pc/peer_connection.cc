@@ -3549,6 +3549,12 @@ RTCError PeerConnection::UpdateTransceiversAndDataChannels(
       source, new_session, old_local_description, old_remote_description,
       bundle_group, &deferred_creates, &deferred_destroys);
 
+  // Channels for the sections collected in deferred_creates are not attached
+  // to their transceivers until the flush below. Do not read
+  // transceiver->internal()->channel() between UpdateSessionContents and
+  // FlushPendingChannelCreates: PushdownMediaDescription skips a transceiver
+  // whose channel is null, so a reader added here would surface as a stream
+  // that never sends rather than as an error.
   RTCError flush_error = FlushPendingChannelCreates(&deferred_creates);
   DestroyDeferredChannels(&deferred_destroys);
 
@@ -6305,6 +6311,10 @@ RTCError PeerConnection::PushdownMediaDescription(
                 FindMediaSectionForTransceiver(transceiver, sdesc);
             cricket::ChannelInterface* channel =
                 transceiver->internal()->channel();
+            if (!channel && content_info && !content_info->rejected) {
+              RTC_LOG(LS_ERROR) << "[CONN-DIAG] event=pushdown_no_channel mid="
+                                << content_info->name;
+            }
             if (!channel || !content_info || content_info->rejected) {
               continue;
             }
