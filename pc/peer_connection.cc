@@ -1112,7 +1112,9 @@ PeerConnection::~PeerConnection() {
 }
 
 void PeerConnection::DestroyAllChannels() {
-  DrainPendingChannelDestroys();
+  if (AmbientFlags::MessageExecutionOptimization()) {
+    DrainPendingChannelDestroys();
+  }
   // TODO: (atharva) each channel destroyed below still takes its own blocking
   // network Invoke inside Deinit. If that hop measures as costly on Close, run
   // DetachMediaInterface for every channel here, then one network Invoke for
@@ -2677,7 +2679,9 @@ RTCError PeerConnection::ApplyLocalDescription(
     std::unique_ptr<SessionDescriptionInterface> desc) {
   RTC_DCHECK_RUN_ON(signaling_thread());
   RTC_DCHECK(desc);
-  DrainPendingChannelDestroys();
+  if (AmbientFlags::MessageExecutionOptimization()) {
+    DrainPendingChannelDestroys();
+  }
 
   if (!AmbientFlags::MessageExecutionOptimization()) {
     stats_->UpdateStats(kStatsOutputLevelStandard);
@@ -3133,7 +3137,9 @@ RTCError PeerConnection::ApplyRemoteDescription(
     std::unique_ptr<SessionDescriptionInterface> desc) {
   RTC_DCHECK_RUN_ON(signaling_thread());
   RTC_DCHECK(desc);
-  DrainPendingChannelDestroys();
+  if (AmbientFlags::MessageExecutionOptimization()) {
+    DrainPendingChannelDestroys();
+  }
 
   if (!AmbientFlags::MessageExecutionOptimization()) {
     stats_->UpdateStats(kStatsOutputLevelStandard);
