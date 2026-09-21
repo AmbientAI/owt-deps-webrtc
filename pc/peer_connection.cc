@@ -1132,7 +1132,7 @@ void PeerConnection::DestroyAllChannels() {
   // whose callees marshal to the signaling thread. Destroy video channels first
   // since they may have a pointer to a voice channel.
   std::vector<cricket::ChannelInterface*> video_channels;
-  std::vector<cricket::ChannelInterface*> voice_channels;
+  std::vector<cricket::ChannelInterface*> audio_channels;
   for (const auto& transceiver : transceivers_) {
     cricket::ChannelInterface* channel = transceiver->internal()->channel();
     if (!channel) {
@@ -1142,14 +1142,14 @@ void PeerConnection::DestroyAllChannels() {
     if (transceiver->internal()->media_type() == cricket::MEDIA_TYPE_VIDEO) {
       video_channels.push_back(channel);
     } else {
-      voice_channels.push_back(channel);
+      audio_channels.push_back(channel);
     }
   }
   worker_thread()->Invoke<void>(RTC_FROM_HERE, [&] {
     for (cricket::ChannelInterface* channel : video_channels) {
       DestroyChannelInterface(channel);
     }
-    for (cricket::ChannelInterface* channel : voice_channels) {
+    for (cricket::ChannelInterface* channel : audio_channels) {
       DestroyChannelInterface(channel);
     }
   });
