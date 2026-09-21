@@ -1147,7 +1147,7 @@ void PeerConnection::DestroyAllChannels() {
   }
   worker_thread()->Invoke<void>(RTC_FROM_HERE, [&] {
     for (cricket::ChannelInterface* channel : video_channels) {
-      channel->DisableMedia();
+      channel->DisableMedia_w();
     }
     for (cricket::ChannelInterface* channel : video_channels) {
       if (channel->media_channel() != nullptr) {

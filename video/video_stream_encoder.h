@@ -191,6 +191,7 @@ class VideoStreamEncoder : public VideoStreamEncoderInterface,
                      DataSize frame_size);
   bool HasInternalSource() const RTC_RUN_ON(&encoder_queue_);
   void ReleaseEncoder() RTC_RUN_ON(&encoder_queue_);
+  void PostStopTask();
 
   void CheckForAnimatedContent(const VideoFrame& frame,
                                int64_t time_when_posted_in_ms)
@@ -198,6 +199,7 @@ class VideoStreamEncoder : public VideoStreamEncoderInterface,
 
   rtc::Event shutdown_event_;
   bool stop_posted_ = false;
+  bool stopped_ RTC_GUARDED_BY(&encoder_queue_) = false;
 
   const uint32_t number_of_cores_;
 
