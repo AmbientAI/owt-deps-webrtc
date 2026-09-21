@@ -20,6 +20,7 @@
 
 #include "absl/algorithm/container.h"
 #include "absl/strings/match.h"
+#include "api/ambient_flags.h"
 #include "api/jsep_ice_candidate.h"
 #include "api/jsep_session_description.h"
 #include "api/media_stream_proxy.h"
@@ -2643,9 +2644,9 @@ RTCError PeerConnection::ApplyLocalDescription(
   RTC_DCHECK_RUN_ON(signaling_thread());
   RTC_DCHECK(desc);
 
-  // Update stats here so that we have the most recent stats for tracks and
-  // streams that might be removed by updating the session description.
-  stats_->UpdateStats(kStatsOutputLevelStandard);
+  if (!AmbientFlags::MessageExecutionOptimization()) {
+    stats_->UpdateStats(kStatsOutputLevelStandard);
+  }
 
   // Take a reference to the old local description since it's used below to
   // compare against the new local description. When setting the new local
@@ -3098,9 +3099,9 @@ RTCError PeerConnection::ApplyRemoteDescription(
   RTC_DCHECK_RUN_ON(signaling_thread());
   RTC_DCHECK(desc);
 
-  // Update stats here so that we have the most recent stats for tracks and
-  // streams that might be removed by updating the session description.
-  stats_->UpdateStats(kStatsOutputLevelStandard);
+  if (!AmbientFlags::MessageExecutionOptimization()) {
+    stats_->UpdateStats(kStatsOutputLevelStandard);
+  }
 
   // Take a reference to the old remote description since it's used below to
   // compare against the new remote description. When setting the new remote
@@ -4430,9 +4431,10 @@ const SessionDescriptionInterface* PeerConnection::pending_remote_description()
 void PeerConnection::Close() {
   RTC_DCHECK_RUN_ON(signaling_thread());
   TRACE_EVENT0("webrtc", "PeerConnection::Close");
-  // Update stats here so that we have the most recent stats for tracks and
-  // streams before the channels are closed.
-  stats_->UpdateStats(kStatsOutputLevelStandard);
+
+  if (!AmbientFlags::MessageExecutionOptimization()) {
+    stats_->UpdateStats(kStatsOutputLevelStandard);
+  }
 
   ChangeSignalingState(PeerConnectionInterface::kClosed);
   NoteUsageEvent(UsageEvent::CLOSE_CALLED);
@@ -6020,6 +6022,48 @@ RTCError PeerConnection::UpdateSessionState(
     ChangeSignalingState(PeerConnectionInterface::kStable);
     transceiver_stable_states_by_transceivers_.clear();
     have_pending_rtp_data_channel_ = false;
+
+    const size_t prune_before = transceivers_.size();
+    size_t prune_m_lines = 0;
+    if (local_description() && local_description()->description()) {
+      prune_m_lines = local_description()->description()->contents().size();
+    }
+    const size_t kPruneMLineMultiplier = 10;
+    const size_t prune_threshold =
+        prune_m_lines ? prune_m_lines * kPruneMLineMultiplier : 0;
+    const bool prune_triggered =
+        AmbientFlags::MessageExecutionOptimization() && prune_threshold &&
+        prune_before > prune_threshold;
+    if (prune_triggered) {
+      transceivers_.erase(
+          std::remove_if(
+              transceivers_.begin(), transceivers_.end(),
+              [](const rtc::scoped_refptr<
+                  RtpTransceiverProxyWithInternal<RtpTransceiver>>& t) {
+                if (!t->internal()->stopped() ||
+                    t->internal()->mid().has_value()) {
+                  return false;
+                }
+                for (const auto& sender : t->internal()->senders()) {
+                  if (sender->internal() != nullptr &&
+                      sender->internal()->track() != nullptr) {
+                    return false;
+                  }
+                }
+                return true;
+              }),
+          transceivers_.end());
+    }
+    if (AmbientFlags::MessageExecutionOptimization()) {
+      RTC_LOG(LS_ERROR) << "[CONN-DIAG] event=transceiver_prune"
+                        << " triggered=" << (prune_triggered ? 1 : 0)
+                        << " transceivers_before=" << prune_before
+                        << " transceivers_after=" << transceivers_.size()
+                        << " m_lines=" << prune_m_lines
+                        << " threshold=" << prune_threshold
+                        << " multiplier=" << kPruneMLineMultiplier
+                        << " pruned=" << (prune_before - transceivers_.size());
+    }
   }
 
   // Update internal objects according to the session description's media

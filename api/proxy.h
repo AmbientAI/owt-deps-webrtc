@@ -62,6 +62,7 @@
 #include "rtc_base/message_handler.h"
 #include "rtc_base/ref_counted_object.h"
 #include "rtc_base/system/rtc_export.h"
+#include "api/ambient_flags.h"
 #include "rtc_base/thread.h"
 
 namespace rtc {
@@ -291,12 +292,16 @@ class ConstMethodCall : public rtc::Message, public rtc::MessageHandler {
 
 #define PROXY_METHOD0(r, method)                           \
   r method() override {                                    \
+    if (AmbientFlags::MessageExecutionOptimization() && signaling_thread_->IsCurrent())                    \
+      return c_->method();                                 \
     MethodCall<C, r> call(c_, &C::method);                 \
     return call.Marshal(RTC_FROM_HERE, signaling_thread_); \
   }
 
 #define PROXY_CONSTMETHOD0(r, method)                      \
   r method() const override {                              \
+    if (AmbientFlags::MessageExecutionOptimization() && signaling_thread_->IsCurrent())                    \
+      return c_->method();                                 \
     ConstMethodCall<C, r> call(c_, &C::method);            \
     return call.Marshal(RTC_FROM_HERE, signaling_thread_); \
   }
@@ -346,12 +351,16 @@ class ConstMethodCall : public rtc::Message, public rtc::MessageHandler {
 // Define methods which should be invoked on the worker thread.
 #define PROXY_WORKER_METHOD0(r, method)                 \
   r method() override {                                 \
+    if (AmbientFlags::MessageExecutionOptimization() && worker_thread_->IsCurrent())                    \
+      return c_->method();                              \
     MethodCall<C, r> call(c_, &C::method);              \
     return call.Marshal(RTC_FROM_HERE, worker_thread_); \
   }
 
 #define PROXY_WORKER_CONSTMETHOD0(r, method)            \
   r method() const override {                           \
+    if (AmbientFlags::MessageExecutionOptimization() && worker_thread_->IsCurrent())                    \
+      return c_->method();                              \
     ConstMethodCall<C, r> call(c_, &C::method);         \
     return call.Marshal(RTC_FROM_HERE, worker_thread_); \
   }
