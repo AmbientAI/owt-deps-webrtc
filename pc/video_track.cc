@@ -15,6 +15,7 @@
 #include <utility>
 #include <vector>
 
+#include "api/ambient_flags.h"
 #include "api/notifier.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/location.h"
@@ -51,6 +52,9 @@ rtc::Thread* VideoSourceReleaseThread() {
 
 VideoTrack::~VideoTrack() {
   video_source_->UnregisterObserver(this);
+  if (!AmbientFlags::MessageExecutionOptimization()) {
+    return;
+  }
 
   rtc::scoped_refptr<VideoTrackSourceInterface> source = video_source_;
   video_source_ = nullptr;
