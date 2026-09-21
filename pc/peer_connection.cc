@@ -3722,26 +3722,16 @@ RTCError PeerConnection::UpdateTransceiverChannel(
   RTC_DCHECK(IsUnifiedPlan());
   RTC_DCHECK(transceiver);
   cricket::ChannelInterface* channel = transceiver->internal()->channel();
-  if (!AmbientFlags::MessageExecutionOptimization()) {
+  if (AmbientFlags::MessageExecutionOptimization()) {
     if (content.rejected) {
       if (channel) {
         transceiver->internal()->SetChannel(nullptr);
-        DestroyChannelInterface(channel);
+        deferred_destroys->push_back(channel);
       }
     } else {
       if (!channel) {
-        if (transceiver->media_type() == cricket::MEDIA_TYPE_AUDIO) {
-          channel = CreateVoiceChannel(content.name);
-        } else {
-          RTC_DCHECK_EQ(cricket::MEDIA_TYPE_VIDEO, transceiver->media_type());
-          channel = CreateVideoChannel(content.name);
-        }
-        if (!channel) {
-          LOG_AND_RETURN_ERROR(
-              RTCErrorType::INTERNAL_ERROR,
-              "Failed to create channel for mid=" + content.name);
-        }
-        transceiver->internal()->SetChannel(channel);
+        deferred->push_back(
+            {transceiver, content.name, transceiver->internal()->media_type()});
       }
     }
     return RTCError::OK();
@@ -3749,12 +3739,22 @@ RTCError PeerConnection::UpdateTransceiverChannel(
   if (content.rejected) {
     if (channel) {
       transceiver->internal()->SetChannel(nullptr);
-      deferred_destroys->push_back(channel);
+      DestroyChannelInterface(channel);
     }
   } else {
     if (!channel) {
-      deferred->push_back(
-          {transceiver, content.name, transceiver->internal()->media_type()});
+      if (transceiver->media_type() == cricket::MEDIA_TYPE_AUDIO) {
+        channel = CreateVoiceChannel(content.name);
+      } else {
+        RTC_DCHECK_EQ(cricket::MEDIA_TYPE_VIDEO, transceiver->media_type());
+        channel = CreateVideoChannel(content.name);
+      }
+      if (!channel) {
+        LOG_AND_RETURN_ERROR(
+            RTCErrorType::INTERNAL_ERROR,
+            "Failed to create channel for mid=" + content.name);
+      }
+      transceiver->internal()->SetChannel(channel);
     }
   }
   return RTCError::OK();
