@@ -259,6 +259,11 @@ class RTC_EXPORT BasicPortAllocatorSession : public PortAllocatorSession,
   bool PruneTurnPorts(Port* newly_pairable_turn_port);
   bool PruneNewlyPairableTurnPort(PortData* newly_pairable_turn_port);
 
+  // AMBIENT: posted, never inline from a SignalDestroyed handler.
+  void MaybeReleaseSupersededSequences();
+  // True while any PortData still holds a raw pointer to this sequence.
+  bool HasPortsForSequence(const AllocationSequence* sequence) const;
+
   BasicPortAllocator* allocator_;
   rtc::Thread* network_thread_;
   std::unique_ptr<rtc::PacketSocketFactory> owned_socket_factory_;
@@ -345,6 +350,9 @@ class AllocationSequence : public rtc::MessageHandler,
   State state() const { return state_; }
   rtc::Network* network() const { return network_; }
 
+  // AMBIENT: superseded = a newer sequence covers this network.
+  bool superseded() const { return superseded_; }
+  void set_superseded() { superseded_ = true; }
   bool network_failed() const { return network_failed_; }
   void set_network_failed() { network_failed_ = true; }
 
@@ -404,6 +412,7 @@ class AllocationSequence : public rtc::MessageHandler,
   // There will be only one udp port per AllocationSequence.
   UDPPort* udp_port_;
   std::vector<Port*> relay_ports_;
+  bool superseded_ = false;
   int phase_;
 };
 

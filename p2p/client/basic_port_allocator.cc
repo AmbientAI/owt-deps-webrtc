@@ -41,6 +41,7 @@ enum {
   MSG_ALLOCATE,
   MSG_ALLOCATION_PHASE,
   MSG_SEQUENCEOBJECTS_CREATED,
+  MSG_RELEASE_SUPERSEDED_SEQUENCES,
   MSG_CONFIG_STOP,
 };
 
@@ -591,6 +592,9 @@ void BasicPortAllocatorSession::OnMessage(rtc::Message* message) {
     case MSG_CONFIG_STOP:
       OnConfigStop();
       break;
+    case MSG_RELEASE_SUPERSEDED_SEQUENCES:
+      MaybeReleaseSupersededSequences();
+      break;
     default:
       RTC_NOTREACHED();
   }
@@ -819,7 +823,14 @@ void BasicPortAllocatorSession::DoAllocate(bool disable_equivalent) {
           this, &BasicPortAllocatorSession::OnPortAllocationComplete);
       sequence->Init();
       sequence->Start();
+      // AMBIENT: newer sequence covers this network; the old socket can go.
+      for (AllocationSequence* existing : sequences_) {
+        if (existing->network() == networks[i] && !existing->superseded()) {
+          existing->set_superseded();
+        }
+      }
       sequences_.push_back(sequence);
+      network_thread_->Post(RTC_FROM_HERE, this, MSG_RELEASE_SUPERSEDED_SEQUENCES);
       done_signal_needed = true;
     }
   }
@@ -1144,6 +1155,38 @@ void BasicPortAllocatorSession::MaybeSignalCandidatesAllocationDone() {
   }
 }
 
+// AMBIENT: PortData holds a raw AllocationSequence* (PortData::sequence_) that
+// GetUnprunedPorts() dereferences, and ports of every kind -- UDP, relay, TCP
+// and STUN -- register with their creating sequence. So a sequence may only be
+// deleted once no PortData refers to it; asking ports_ directly covers all four
+// kinds, where enumerating the sequence's own members would miss TCP and STUN.
+bool BasicPortAllocatorSession::HasPortsForSequence(
+    const AllocationSequence* sequence) const {
+  for (const PortData& data : ports_) {
+    if (data.sequence() == sequence) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// AMBIENT: each failed-network regather leaks a sequence and its UDP socket;
+// free both once no port still refers to it.
+void BasicPortAllocatorSession::MaybeReleaseSupersededSequences() {
+  RTC_DCHECK_RUN_ON(network_thread_);
+  for (auto it = sequences_.begin(); it != sequences_.end();) {
+    AllocationSequence* sequence = *it;
+    if (sequence->superseded() && !HasPortsForSequence(sequence)) {
+      RTC_LOG(LS_INFO) << "Releasing superseded allocation sequence on "
+                       << sequence->network()->name();
+      it = sequences_.erase(it);
+      delete sequence;  // dtor also clears its pending messages
+    } else {
+      ++it;
+    }
+  }
+}
+
 void BasicPortAllocatorSession::OnPortDestroyed(PortInterface* port) {
   RTC_DCHECK_RUN_ON(network_thread_);
   for (std::vector<PortData>::iterator iter = ports_.begin();
@@ -1152,6 +1195,8 @@ void BasicPortAllocatorSession::OnPortDestroyed(PortInterface* port) {
       ports_.erase(iter);
       RTC_LOG(LS_INFO) << port->ToString() << ": Removed port from allocator ("
                        << static_cast<int>(ports_.size()) << " remaining)";
+      // AMBIENT: possibly the last borrower.
+      network_thread_->Post(RTC_FROM_HERE, this, MSG_RELEASE_SUPERSEDED_SEQUENCES);
       return;
     }
   }
