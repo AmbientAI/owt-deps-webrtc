@@ -29,8 +29,13 @@ class RTC_EXPORT MessageHandler {
 
  protected:
   MessageHandler() {}
+  // With auto_cleanup false the destructor does not clear every thread's queue;
+  // the subclass must clear the threads it posts to itself.
+  explicit MessageHandler(bool auto_cleanup) : auto_cleanup_(auto_cleanup) {}
+  bool auto_cleanup() const { return auto_cleanup_; }
 
  private:
+  const bool auto_cleanup_ = true;
   RTC_DISALLOW_COPY_AND_ASSIGN(MessageHandler);
 };
 

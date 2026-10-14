@@ -19,6 +19,7 @@
 
 #include "absl/algorithm/container.h"
 #include "absl/strings/match.h"
+#include "api/ambient_flags.h"
 #include "p2p/base/connection.h"
 #include "p2p/base/port_allocator.h"
 #include "rtc_base/checks.h"
@@ -120,7 +121,9 @@ Port::Port(rtc::Thread* thread,
            rtc::Network* network,
            const std::string& username_fragment,
            const std::string& password)
-    : thread_(thread),
+    : rtc::MessageHandler(
+          /*auto_cleanup=*/!webrtc::AmbientFlags::MessageExecutionOptimization()),
+      thread_(thread),
       factory_(factory),
       type_(type),
       send_retransmit_count_attribute_(false),
@@ -148,7 +151,9 @@ Port::Port(rtc::Thread* thread,
            uint16_t max_port,
            const std::string& username_fragment,
            const std::string& password)
-    : thread_(thread),
+    : rtc::MessageHandler(
+          /*auto_cleanup=*/!webrtc::AmbientFlags::MessageExecutionOptimization()),
+      thread_(thread),
       factory_(factory),
       type_(type),
       send_retransmit_count_attribute_(false),
@@ -188,6 +193,11 @@ void Port::Construct() {
 }
 
 Port::~Port() {
+  // MSG_DESTROY_IF_DEAD is always pending, and TurnEntry posts with this port.
+  if (!auto_cleanup()) {
+    thread_->Clear(this);
+  }
+
   // Delete all of the remaining connections.  We copy the list up front
   // because each deletion will cause it to be modified.
 

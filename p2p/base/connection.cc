@@ -19,6 +19,7 @@
 
 #include "absl/algorithm/container.h"
 #include "absl/strings/match.h"
+#include "api/ambient_flags.h"
 #include "p2p/base/port_allocator.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/crc32.h"
@@ -282,7 +283,9 @@ int ConnectionRequest::resend_delay() {
 Connection::Connection(Port* port,
                        size_t index,
                        const Candidate& remote_candidate)
-    : id_(rtc::CreateRandomId()),
+    : rtc::MessageHandler(
+          /*auto_cleanup=*/!webrtc::AmbientFlags::MessageExecutionOptimization()),
+      id_(rtc::CreateRandomId()),
       port_(port),
       local_candidate_index_(index),
       remote_candidate_(remote_candidate),
@@ -312,7 +315,13 @@ Connection::Connection(Port* port,
   RTC_LOG(LS_INFO) << ToString() << ": Connection created";
 }
 
-Connection::~Connection() {}
+Connection::~Connection() {
+  // A pending MSG_DELETE survives when the port deletes this directly or
+  // Destroy() ran twice.
+  if (!auto_cleanup()) {
+    port_->thread()->Clear(this);
+  }
+}
 
 const Candidate& Connection::local_candidate() const {
   RTC_DCHECK(local_candidate_index_ < port_->Candidates().size());
