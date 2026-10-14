@@ -29,6 +29,7 @@
 #include <utility>
 
 #include "absl/algorithm/container.h"
+#include "api/ambient_flags.h"
 #include "rtc_base/atomic_ops.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/critical_section.h"
@@ -924,8 +925,11 @@ void Thread::InvokeInternal(const Location& posted_from,
 
   class FunctorMessageHandler : public MessageHandler {
    public:
+    // Send returns only after the message has run, so none is left queued.
     explicit FunctorMessageHandler(rtc::FunctionView<void()> functor)
-        : functor_(functor) {}
+        : MessageHandler(/*auto_cleanup=*/!webrtc::AmbientFlags::
+                             MessageExecutionOptimization()),
+          functor_(functor) {}
     void OnMessage(Message* msg) override { functor_(); }
 
    private:
