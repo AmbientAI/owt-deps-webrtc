@@ -6308,9 +6308,39 @@ RTCError PeerConnection::PushdownMediaDescription(
       }
     }
   } else {
+    // One network hop for the writable state every channel's send-readiness
+    // check reads, instead of one per channel inside the worker batch.
+    std::vector<cricket::ChannelInterface*> channels;
+    for (const auto& transceiver : transceivers_) {
+      cricket::ChannelInterface* channel = transceiver->internal()->channel();
+      if (channel) {
+        channels.push_back(channel);
+      }
+    }
+    const std::vector<bool> ever_writable =
+        network_thread()->Invoke<std::vector<bool>>(RTC_FROM_HERE, [&channels] {
+          std::vector<bool> result;
+          for (cricket::ChannelInterface* channel : channels) {
+            result.push_back(channel->was_ever_writable_n());
+          }
+          return result;
+        });
     std::string batch_error;
     const bool batch_ok = worker_thread()->Invoke<bool>(
-        RTC_FROM_HERE, [this, sdesc, type, source, enable_sending, &batch_error] {
+        RTC_FROM_HERE, [this, sdesc, type, source, enable_sending, &batch_error,
+                        &channels, &ever_writable] {
+          for (size_t i = 0; i < channels.size(); ++i) {
+            channels[i]->SetWasEverWritableSnapshot_w(ever_writable[i]);
+          }
+          struct ClearSnapshots {
+            const std::vector<cricket::ChannelInterface*>& channels;
+            ~ClearSnapshots() {
+              for (cricket::ChannelInterface* channel : channels) {
+                channel->SetWasEverWritableSnapshot_w(absl::nullopt);
+              }
+            }
+          } clear_snapshots{channels};
+
           if (enable_sending) {
             EnableSending();
           }

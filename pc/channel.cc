@@ -294,18 +294,36 @@ bool BaseChannel::IsReadyToReceiveMedia_w() const {
 }
 
 bool BaseChannel::IsReadyToSendMedia_w() const {
+  if (was_ever_writable_snapshot_) {
+    return IsReadyToSendMedia(*was_ever_writable_snapshot_);
+  }
   // Need to access some state updated on the network thread.
   return network_thread_->Invoke<bool>(
       RTC_FROM_HERE, Bind(&BaseChannel::IsReadyToSendMedia_n, this));
 }
 
 bool BaseChannel::IsReadyToSendMedia_n() const {
+  return IsReadyToSendMedia(was_ever_writable());
+}
+
+bool BaseChannel::IsReadyToSendMedia(bool ever_writable) const {
   // Send outgoing data if we are enabled, have local and remote content,
   // and we have had some form of connectivity.
   return enabled() &&
          webrtc::RtpTransceiverDirectionHasRecv(remote_content_direction_) &&
          webrtc::RtpTransceiverDirectionHasSend(local_content_direction_) &&
-         was_ever_writable();
+         ever_writable;
+}
+
+bool BaseChannel::was_ever_writable_n() const {
+  RTC_DCHECK(network_thread_->IsCurrent());
+  return was_ever_writable_;
+}
+
+void BaseChannel::SetWasEverWritableSnapshot_w(
+    absl::optional<bool> snapshot) {
+  RTC_DCHECK(worker_thread_->IsCurrent());
+  was_ever_writable_snapshot_ = snapshot;
 }
 
 bool BaseChannel::SendPacket(rtc::CopyOnWriteBuffer* packet,

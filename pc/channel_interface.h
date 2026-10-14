@@ -14,6 +14,7 @@
 #include <string>
 #include <vector>
 
+#include "absl/types/optional.h"
 #include "api/jsep.h"
 #include "api/media_types.h"
 #include "media/base/media_channel.h"
@@ -65,6 +66,11 @@ class ChannelInterface {
   virtual bool SetRtpTransport(webrtc::RtpTransportInternal* rtp_transport) = 0;
 
   virtual void DisableMedia_w() {}
+
+  // While a snapshot is set, the worker's send-readiness check uses it instead
+  // of a network-thread hop. was_ever_writable never returns to false.
+  virtual bool was_ever_writable_n() const { return false; }
+  virtual void SetWasEverWritableSnapshot_w(absl::optional<bool> snapshot) {}
 
  protected:
   virtual ~ChannelInterface() = default;
