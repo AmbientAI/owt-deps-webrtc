@@ -67,8 +67,8 @@ class ChannelInterface {
 
   virtual void DisableMedia_w() {}
 
-  // While a snapshot is set, the worker's send-readiness check uses it instead
-  // of a network-thread hop. was_ever_writable never returns to false.
+  // While a true snapshot is set, the worker's send-readiness check uses it
+  // instead of a network-thread hop. was_ever_writable never returns to false.
   virtual bool was_ever_writable_n() const { return false; }
   virtual void SetWasEverWritableSnapshot_w(absl::optional<bool> snapshot) {}
 

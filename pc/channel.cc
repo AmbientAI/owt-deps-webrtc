@@ -294,8 +294,10 @@ bool BaseChannel::IsReadyToReceiveMedia_w() const {
 }
 
 bool BaseChannel::IsReadyToSendMedia_w() const {
-  if (was_ever_writable_snapshot_) {
-    return IsReadyToSendMedia(*was_ever_writable_snapshot_);
+  // Only a true snapshot is used: it cannot go stale. A false one may have
+  // flipped, and its catch-up may already have run before this batch.
+  if (was_ever_writable_snapshot_.value_or(false)) {
+    return IsReadyToSendMedia(true);
   }
   // Need to access some state updated on the network thread.
   return network_thread_->Invoke<bool>(
