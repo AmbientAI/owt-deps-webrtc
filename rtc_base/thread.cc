@@ -33,6 +33,7 @@
 #include "rtc_base/atomic_ops.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/critical_section.h"
+#include "rtc_base/event.h"
 #include "rtc_base/logging.h"
 #include "rtc_base/null_socket_server.h"
 #include "rtc_base/task_utils/to_queued_task.h"
@@ -876,31 +877,49 @@ void Thread::Send(const Location& posted_from,
 
   AssertBlockingIsAllowedOnCurrentThread();
 
-  AutoThread thread;
+  // With the flag on, wait on an Event instead: AutoThread builds a Thread and
+  // a socket server per call, and clears every thread's queue when destroyed.
+  const bool event_wait = webrtc::AmbientFlags::MessageExecutionOptimization();
+  std::unique_ptr<AutoThread> auto_thread;
   Thread* current_thread = Thread::Current();
-  RTC_DCHECK(current_thread != nullptr);  // AutoThread ensures this
+  if (!event_wait) {
+    auto_thread.reset(new AutoThread());
+    current_thread = Thread::Current();
+    RTC_DCHECK(current_thread != nullptr);  // AutoThread ensures this
+  }
 #if RTC_DCHECK_IS_ON
-  ThreadManager::Instance()->RegisterSendAndCheckForCycles(current_thread,
-                                                           this);
+  if (current_thread != nullptr) {
+    ThreadManager::Instance()->RegisterSendAndCheckForCycles(current_thread,
+                                                             this);
+  }
 #endif
   bool ready = false;
-  PostTask(
-      webrtc::ToQueuedTask([msg]() mutable { msg.phandler->OnMessage(&msg); },
-                           [this, &ready, current_thread] {
-                             CritScope cs(&crit_);
-                             ready = true;
-                             current_thread->socketserver()->WakeUp();
-                           }));
+  Event done;
+  PostTask(webrtc::ToQueuedTask(
+      [msg]() mutable { msg.phandler->OnMessage(&msg); },
+      [this, &ready, &done, event_wait, current_thread] {
+        if (event_wait) {
+          done.Set();
+          return;
+        }
+        CritScope cs(&crit_);
+        ready = true;
+        current_thread->socketserver()->WakeUp();
+      }));
 
   bool waited = false;
-  crit_.Enter();
-  while (!ready) {
-    crit_.Leave();
-    current_thread->socketserver()->Wait(kForever, false);
-    waited = true;
+  if (event_wait) {
+    done.Wait(Event::kForever);
+  } else {
     crit_.Enter();
+    while (!ready) {
+      crit_.Leave();
+      current_thread->socketserver()->Wait(kForever, false);
+      waited = true;
+      crit_.Enter();
+    }
+    crit_.Leave();
   }
-  crit_.Leave();
 
   // Our Wait loop above may have consumed some WakeUp events for this
   // Thread, that weren't relevant to this Send.  Losing these WakeUps can
