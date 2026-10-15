@@ -881,7 +881,8 @@ void Thread::Send(const Location& posted_from,
   // a socket server per call, and clears every thread's queue when destroyed.
   const bool event_wait = webrtc::AmbientFlags::MessageExecutionOptimization();
   std::unique_ptr<AutoThread> auto_thread;
-  Thread* current_thread = Thread::Current();
+  // CurrentThread, not Current: Current wraps an unwrapped main thread for good.
+  Thread* current_thread = ThreadManager::Instance()->CurrentThread();
   if (!event_wait) {
     auto_thread.reset(new AutoThread());
     current_thread = Thread::Current();
