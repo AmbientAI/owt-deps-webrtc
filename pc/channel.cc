@@ -294,18 +294,38 @@ bool BaseChannel::IsReadyToReceiveMedia_w() const {
 }
 
 bool BaseChannel::IsReadyToSendMedia_w() const {
+  // Only a true snapshot is used: it cannot go stale. A false one may have
+  // flipped, and its catch-up may already have run before this batch.
+  if (was_ever_writable_snapshot_.value_or(false)) {
+    return IsReadyToSendMedia(true);
+  }
   // Need to access some state updated on the network thread.
   return network_thread_->Invoke<bool>(
       RTC_FROM_HERE, Bind(&BaseChannel::IsReadyToSendMedia_n, this));
 }
 
 bool BaseChannel::IsReadyToSendMedia_n() const {
+  return IsReadyToSendMedia(was_ever_writable());
+}
+
+bool BaseChannel::IsReadyToSendMedia(bool ever_writable) const {
   // Send outgoing data if we are enabled, have local and remote content,
   // and we have had some form of connectivity.
   return enabled() &&
          webrtc::RtpTransceiverDirectionHasRecv(remote_content_direction_) &&
          webrtc::RtpTransceiverDirectionHasSend(local_content_direction_) &&
-         was_ever_writable();
+         ever_writable;
+}
+
+bool BaseChannel::was_ever_writable_n() const {
+  RTC_DCHECK(network_thread_->IsCurrent());
+  return was_ever_writable_;
+}
+
+void BaseChannel::SetWasEverWritableSnapshot_w(
+    absl::optional<bool> snapshot) {
+  RTC_DCHECK(worker_thread_->IsCurrent());
+  was_ever_writable_snapshot_ = snapshot;
 }
 
 bool BaseChannel::SendPacket(rtc::CopyOnWriteBuffer* packet,
@@ -484,6 +504,10 @@ void BaseChannel::OnRtpPacket(const webrtc::RtpPacketReceived& parsed_packet) {
 void BaseChannel::UpdateRtpHeaderExtensionMap(
     const RtpHeaderExtensions& header_extensions) {
   RTC_DCHECK(rtp_transport_);
+  if (defer_network_ && worker_thread_->IsCurrent()) {
+    deferred_header_extensions_ = header_extensions;
+    return;
+  }
   // Update the header extension map on network thread in case there is data
   // race.
   // TODO(zhihuang): Add an rtc::ThreadChecker make sure to RtpTransport won't
@@ -499,9 +523,44 @@ void BaseChannel::UpdateRtpHeaderExtensionMap(
 
 bool BaseChannel::RegisterRtpDemuxerSink() {
   RTC_DCHECK(rtp_transport_);
+  // Deferred registrations use the criteria as they stand at the flush, which
+  // is what the last of the per-call registrations would have installed.
+  if (defer_network_ && worker_thread_->IsCurrent()) {
+    deferred_demuxer_sink_ = true;
+    return true;
+  }
   return network_thread_->Invoke<bool>(RTC_FROM_HERE, [this] {
     return rtp_transport_->RegisterRtpDemuxerSink(demuxer_criteria_, this);
   });
+}
+
+void BaseChannel::BeginDeferNetwork_w() {
+  RTC_DCHECK(worker_thread_->IsCurrent());
+  defer_network_ = true;
+}
+
+bool BaseChannel::FlushDeferredNetwork_n(std::string* error) {
+  RTC_DCHECK(network_thread_->IsCurrent());
+  RTC_DCHECK(rtp_transport_);
+  if (deferred_header_extensions_) {
+    rtp_transport_->UpdateRtpHeaderExtensionMap(*deferred_header_extensions_);
+    deferred_header_extensions_.reset();
+  }
+  if (deferred_demuxer_sink_) {
+    deferred_demuxer_sink_ = false;
+    if (!rtp_transport_->RegisterRtpDemuxerSink(demuxer_criteria_, this)) {
+      if (error) {
+        *error = "Failed to set up demuxing for " + content_name_;
+      }
+      return false;
+    }
+  }
+  return true;
+}
+
+void BaseChannel::EndDeferNetwork_w() {
+  RTC_DCHECK(worker_thread_->IsCurrent());
+  defer_network_ = false;
 }
 
 void BaseChannel::EnableMedia_w() {

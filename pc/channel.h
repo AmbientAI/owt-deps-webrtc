@@ -100,6 +100,11 @@ class BaseChannel : public ChannelInterface,
   // done.
   void Deinit();
   void DisableMedia_w() override;
+  bool was_ever_writable_n() const override;
+  void SetWasEverWritableSnapshot_w(absl::optional<bool> snapshot) override;
+  void BeginDeferNetwork_w() override;
+  bool FlushDeferredNetwork_n(std::string* error) override;
+  void EndDeferNetwork_w() override;
 
   rtc::Thread* worker_thread() const { return worker_thread_; }
   rtc::Thread* network_thread() const { return network_thread_; }
@@ -282,6 +287,7 @@ class BaseChannel : public ChannelInterface,
   void DisconnectFromRtpTransport();
   void SignalSentPacket_n(const rtc::SentPacket& sent_packet);
   bool IsReadyToSendMedia_n() const;
+  bool IsReadyToSendMedia(bool ever_writable) const;
 
   rtc::Thread* const worker_thread_;
   rtc::Thread* const network_thread_;
@@ -303,6 +309,13 @@ class BaseChannel : public ChannelInterface,
   std::vector<std::pair<rtc::Socket::Option, int> > rtcp_socket_options_;
   bool writable_ = false;
   bool was_ever_writable_ = false;
+  // Worker thread.
+  absl::optional<bool> was_ever_writable_snapshot_;
+  // Worker thread. While set, header-extension and demuxer writes are kept
+  // here and applied by FlushDeferredNetwork_n.
+  bool defer_network_ = false;
+  absl::optional<RtpHeaderExtensions> deferred_header_extensions_;
+  bool deferred_demuxer_sink_ = false;
   const bool srtp_required_ = true;
   webrtc::CryptoOptions crypto_options_;
 

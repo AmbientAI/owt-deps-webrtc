@@ -11,6 +11,7 @@
 #include "pc/peer_connection.h"
 
 #include <algorithm>
+#include <functional>
 #include <limits>
 #include <memory>
 #include <queue>
@@ -6308,9 +6309,63 @@ RTCError PeerConnection::PushdownMediaDescription(
       }
     }
   } else {
+    // One network hop for the writable state every channel's send-readiness
+    // check reads, instead of one per channel inside the worker batch.
+    std::vector<cricket::ChannelInterface*> channels;
+    for (const auto& transceiver : transceivers_) {
+      cricket::ChannelInterface* channel = transceiver->internal()->channel();
+      if (channel) {
+        channels.push_back(channel);
+      }
+    }
+    const std::vector<bool> ever_writable =
+        network_thread()->Invoke<std::vector<bool>>(RTC_FROM_HERE, [&channels] {
+          std::vector<bool> result;
+          for (cricket::ChannelInterface* channel : channels) {
+            result.push_back(channel->was_ever_writable_n());
+          }
+          return result;
+        });
     std::string batch_error;
     const bool batch_ok = worker_thread()->Invoke<bool>(
-        RTC_FROM_HERE, [this, sdesc, type, source, enable_sending, &batch_error] {
+        RTC_FROM_HERE, [this, sdesc, type, source, enable_sending, &batch_error,
+                        &channels, &ever_writable] {
+          for (size_t i = 0; i < channels.size(); ++i) {
+            channels[i]->SetWasEverWritableSnapshot_w(ever_writable[i]);
+            channels[i]->BeginDeferNetwork_w();
+          }
+          // One network hop for every channel's header-extension and demuxer
+          // writes, instead of one per channel per write.
+          bool flushed = false;
+          auto flush = [this, &channels, &flushed](std::string* error) {
+            flushed = true;
+            return network_thread()->Invoke<bool>(
+                RTC_FROM_HERE, [&channels, error] {
+                  bool ok = true;
+                  for (cricket::ChannelInterface* channel : channels) {
+                    if (!channel->FlushDeferredNetwork_n(ok ? error : nullptr)) {
+                      ok = false;
+                    }
+                  }
+                  return ok;
+                });
+          };
+          // On every exit: apply what is still deferred, then end the batch.
+          struct EndBatch {
+            const std::vector<cricket::ChannelInterface*>& channels;
+            const bool& flushed;
+            std::function<bool(std::string*)> flush;
+            ~EndBatch() {
+              if (!flushed) {
+                flush(nullptr);
+              }
+              for (cricket::ChannelInterface* channel : channels) {
+                channel->EndDeferNetwork_w();
+                channel->SetWasEverWritableSnapshot_w(absl::nullopt);
+              }
+            }
+          } end_batch{channels, flushed, flush};
+
           if (enable_sending) {
             EnableSending();
           }
@@ -6341,6 +6396,11 @@ RTCError PeerConnection::PushdownMediaDescription(
               batch_error = error;
               return false;
             }
+          }
+          std::string flush_error;
+          if (!flush(&flush_error)) {
+            batch_error = flush_error;
+            return false;
           }
           return true;
         });
