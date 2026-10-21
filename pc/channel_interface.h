@@ -72,6 +72,12 @@ class ChannelInterface {
   virtual bool was_ever_writable_n() const { return false; }
   virtual void SetWasEverWritableSnapshot_w(absl::optional<bool> snapshot) {}
 
+  // During a batched pushdown, header-extension and demuxer writes are kept on
+  // the worker and applied for every channel in one network hop.
+  virtual void BeginDeferNetwork_w() {}
+  virtual bool FlushDeferredNetwork_n(std::string* error) { return true; }
+  virtual void EndDeferNetwork_w() {}
+
  protected:
   virtual ~ChannelInterface() = default;
 };
