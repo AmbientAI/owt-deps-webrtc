@@ -18,6 +18,7 @@
 #include <vector>
 
 #include "absl/algorithm/container.h"
+#include "api/ambient_flags.h"
 #include "p2p/base/basic_packet_socket_factory.h"
 #include "p2p/base/port.h"
 #include "p2p/base/stun_port.h"
@@ -1216,7 +1217,9 @@ AllocationSequence::AllocationSequence(BasicPortAllocatorSession* session,
                                        rtc::Network* network,
                                        PortConfiguration* config,
                                        uint32_t flags)
-    : session_(session),
+    : rtc::MessageHandler(
+          /*auto_cleanup=*/!webrtc::AmbientFlags::MessageExecutionOptimization()),
+      session_(session),
       network_(network),
       config_(config),
       state_(kInit),

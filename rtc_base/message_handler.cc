@@ -15,7 +15,9 @@
 namespace rtc {
 
 MessageHandler::~MessageHandler() {
-  ThreadManager::Clear(this);
+  if (auto_cleanup_) {
+    ThreadManager::Clear(this);
+  }
 }
 
 }  // namespace rtc

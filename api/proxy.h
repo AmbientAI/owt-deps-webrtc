@@ -119,8 +119,11 @@ template <typename C, typename R, typename... Args>
 class MethodCall : public rtc::Message, public rtc::MessageHandler {
  public:
   typedef R (C::*Method)(Args...);
+  // Never posted: SynchronousMethodCall calls OnMessage directly.
   MethodCall(C* c, Method m, Args&&... args)
-      : c_(c),
+      : rtc::MessageHandler(
+            /*auto_cleanup=*/!AmbientFlags::MessageExecutionOptimization()),
+        c_(c),
         m_(m),
         args_(std::forward_as_tuple(std::forward<Args>(args)...)) {}
 
@@ -147,8 +150,11 @@ template <typename C, typename R, typename... Args>
 class ConstMethodCall : public rtc::Message, public rtc::MessageHandler {
  public:
   typedef R (C::*Method)(Args...) const;
+  // Never posted: SynchronousMethodCall calls OnMessage directly.
   ConstMethodCall(const C* c, Method m, Args&&... args)
-      : c_(c),
+      : rtc::MessageHandler(
+            /*auto_cleanup=*/!AmbientFlags::MessageExecutionOptimization()),
+        c_(c),
         m_(m),
         args_(std::forward_as_tuple(std::forward<Args>(args)...)) {}
 

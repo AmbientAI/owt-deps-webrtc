@@ -13,8 +13,11 @@
 namespace webrtc {
 namespace internal {
 
+// Invoke returns only after the posted message has run, so none is left queued.
 SynchronousMethodCall::SynchronousMethodCall(rtc::MessageHandler* proxy)
-    : proxy_(proxy) {}
+    : rtc::MessageHandler(
+          /*auto_cleanup=*/!AmbientFlags::MessageExecutionOptimization()),
+      proxy_(proxy) {}
 
 SynchronousMethodCall::~SynchronousMethodCall() = default;
 

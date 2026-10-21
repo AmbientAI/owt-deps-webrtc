@@ -14,6 +14,7 @@
 #include <memory>
 #include <vector>
 
+#include "api/ambient_flags.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/helpers.h"
 #include "rtc_base/logging.h"
@@ -179,7 +180,9 @@ bool StunRequestManager::CheckResponse(const char* data, size_t size) {
 }
 
 StunRequest::StunRequest()
-    : count_(0),
+    : rtc::MessageHandler(
+          /*auto_cleanup=*/!webrtc::AmbientFlags::MessageExecutionOptimization()),
+      count_(0),
       timeout_(false),
       manager_(0),
       msg_(new StunMessage()),
@@ -190,7 +193,9 @@ StunRequest::StunRequest()
 }
 
 StunRequest::StunRequest(StunMessage* request)
-    : count_(0),
+    : rtc::MessageHandler(
+          /*auto_cleanup=*/!webrtc::AmbientFlags::MessageExecutionOptimization()),
+      count_(0),
       timeout_(false),
       manager_(0),
       msg_(request),
