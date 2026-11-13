@@ -690,6 +690,7 @@ ProduceMediaStreamTrackStatsFromVideoSenderInfo(
   // when available. https://crbug.com/659137
   video_track_stats->frames_sent = video_sender_info.frames_encoded;
   video_track_stats->huge_frames_sent = video_sender_info.huge_frames_sent;
+  video_track_stats->frames_dropped = video_sender_info.frames_dropped;
   return video_track_stats;
 }
 

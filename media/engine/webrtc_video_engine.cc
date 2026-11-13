@@ -2525,6 +2525,11 @@ VideoSenderInfo WebRtcVideoChannel::WebRtcVideoSendStream::GetVideoSenderInfo(
 
   info.content_type = stats.content_type;
   info.huge_frames_sent = stats.huge_frames_sent;
+  info.frames_dropped = stats.frames_dropped_by_capturer +
+                        stats.frames_dropped_by_encoder_queue +
+                        stats.frames_dropped_by_rate_limiter +
+                        stats.frames_dropped_by_congestion_window +
+                        stats.frames_dropped_by_encoder;
 
   info.send_frame_width = 0;
   info.send_frame_height = 0;
