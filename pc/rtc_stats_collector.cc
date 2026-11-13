@@ -412,6 +412,10 @@ void SetOutboundRTPStreamStatsFromVideoSenderInfo(
       static_cast<uint32_t>(video_sender_info.plis_rcvd);
   outbound_video->nack_count =
       static_cast<uint32_t>(video_sender_info.nacks_rcvd);
+  if (video_sender_info.target_bitrate_bps > 0) {
+    outbound_video->target_bitrate =
+        static_cast<double>(video_sender_info.target_bitrate_bps);
+  }
   if (video_sender_info.qp_sum)
     outbound_video->qp_sum = *video_sender_info.qp_sum;
   outbound_video->frames_encoded = video_sender_info.frames_encoded;

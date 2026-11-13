@@ -596,6 +596,8 @@ struct VideoSenderInfo : public MediaSenderInfo {
   uint32_t huge_frames_sent = 0;
   // Frames dropped before they were sent, for any reason (Ambient patch).
   uint32_t frames_dropped = 0;
+  // Bitrate the encoder is told to target, 0 while paused (Ambient patch).
+  int target_bitrate_bps = 0;
 };
 
 struct VideoReceiverInfo : public MediaReceiverInfo {

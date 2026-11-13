@@ -2530,6 +2530,7 @@ VideoSenderInfo WebRtcVideoChannel::WebRtcVideoSendStream::GetVideoSenderInfo(
                         stats.frames_dropped_by_rate_limiter +
                         stats.frames_dropped_by_congestion_window +
                         stats.frames_dropped_by_encoder;
+  info.target_bitrate_bps = stats.target_media_bitrate_bps;
 
   info.send_frame_width = 0;
   info.send_frame_height = 0;
